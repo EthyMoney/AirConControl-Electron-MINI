@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Air Conditioner Controller</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1 class="title">AC Controller</h1>
+
+    <div class="status-section">
+      <h2>Status</h2>
+      <div class="status-row">
+        <div class="status-label">Current Task:</div>
+        <div class="status-value" id="currentStatusLabel">-</div>
+      </div>
+      <div class="status-row">
+        <div class="status-label">Power:</div>
+        <div class="status-value" id="powerStatusLabel">-</div>
+      </div>
+    </div>
+
+    <div class="main-section">
+      <div class="temperature-section">
+        <div class="temperature-label">Set Temperature</div>
+        <div class="temperature-value" id="setTemp">-</div>
+          <div class="temperature-buttons">
+            <button id="tempDecreaseButton" class="decrease">-</button>
+            <button id="tempIncreaseButton" class="increase">+</button>
+          </div>
+      </div>
+      <div class="temperature-section">
+        <div class="temperature-label">Current Temperature</div>
+        <div class="temperature-value" id="currentTemp">-</div>
+      </div>
+    </div>
+
+    <div class="control-buttons">
+      <button id="powerOnButton">Power On</button>
+      <button id="powerOffButton">Power Off</button>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+
+</html>
