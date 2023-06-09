@@ -4,41 +4,67 @@
 
 body {
   font-family: Arial, sans-serif;
-  background-color: #f5f5f5;
+  background-color: #333333;
+  color: #ffffff;
   margin: 0;
   padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
 }
 
 .container {
+  transform: rotate(-90deg);
+  transform-origin: center center;
   width: 320px;
   height: 480px;
-  margin: 0 auto;
-  padding: 20px;
-  background-color: #ffffff;
-  color: #333333;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  margin: 0;
+  padding: 20px;
+  background-color: #222222;
+  color: #ffffff;
 }
 
 .title {
   text-align: center;
-  font-size: 18px;
+  font-size: 24px;
   font-weight: bold;
   margin-bottom: 10px;
 }
 
 .status-section {
-  background-color: #ffffff;
   border-radius: 10px;
   padding: 10px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 8px black;
+}
+
+.status-cooling {
+  background-color: #bfe1ff;
+  color: black;
+}
+
+.status-heating {
+  background-color: #ffcccc;
+  color: black;
+}
+
+.status-off {
+  background-color: #333333;
+  color: white;
+}
+
+.status-idle {
+  background-color: #4f512f;
+  color: white;
 }
 
 .status-section h2 {
   margin-top: 0;
   margin-bottom: 10px;
-  font-size: 14px;
+  font-size: 18px;
 }
 
 .status-row {
@@ -50,7 +76,7 @@ body {
 
 .status-label {
   font-weight: bold;
-  font-size: 12px;
+  font-size: 18px;
 }
 
 .main-section {
@@ -62,10 +88,10 @@ body {
 
 .temperature-section {
   flex: 1;
-  background-color: #ffffff;
+  background-color: #333333;
   border-radius: 10px;
   padding: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 8px black;
   text-align: center;
   margin-bottom: 10px;
   display: flex;
@@ -80,25 +106,36 @@ body {
 .temperature-label {
   font-weight: bold;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: 18px;
 }
 
 .temperature-value {
-  font-size: 24px;
+  font-size: 32px;
   font-weight: bold;
 }
 
-.temperature-buttons button {
-  font-size: 18px;
-  width: 30px;
+.temperature-buttons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
   margin-top: 10px;
-  height: 30px;
+  margin-left: -20px;
+  margin-right: -20px;
+}
+
+.temperature-buttons button {
+  font-size: 28px;
+  width: 50px;
+  height: 50px;
+  font-weight: bolder;
   border-radius: 50%;
-  background-color: #f5f5f5;
+  background-color: #333333;
   border: none;
   outline: none;
   cursor: pointer;
   transition: background-color 0.3s ease;
+  color: black;
+  margin: 0 5px;
 }
 
 .temperature-buttons button:disabled {
@@ -107,19 +144,16 @@ body {
 }
 
 .temperature-buttons button.decrease {
-  color: #ffffff;
   background-color: #bfe1ff;
-  margin-right: 5px;
 }
 
 .temperature-buttons button.increase {
-  color: #ffffff;
-  background-color: #f99999;
-  margin-left: 5px;
+  background-color: #ff5555;
 }
 
 .temperature-buttons button:hover {
-  background-color: #ebebeb;
+  background-color: #444444;
+  color: white;
 }
 
 .control-buttons {
@@ -128,11 +162,13 @@ body {
 }
 
 .control-buttons button {
-  font-size: 12px;
+  font-size: 16px;
   padding: 6px 12px;
   border-radius: 5px;
-  background-color: #f5f5f5;
+  background-color: #333333;
+  box-shadow: 0 2px 4px black;
   border: none;
   outline: none;
   cursor: pointer;
+  color: white;
 }

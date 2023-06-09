@@ -1,17 +1,19 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, screen } = require('electron');
 const path = require('path');
 
 // Function to create the main window
 function createWindow() {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: height, // Swap width and height for vertical orientation
+    height: width,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
       enableRemoteModule: true
     },
-    icon: path.join(__dirname, 'snow.ico')
+    icon: path.join(__dirname, 'snow.ico'),
+    frame: false // Optional: Remove window frame if desired
   });
 
   // Hide the menu bar

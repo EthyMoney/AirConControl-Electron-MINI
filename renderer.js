@@ -92,19 +92,19 @@ function updateStatusUI(statusData) {
     updateValueWithAnimation(currentTemp, statusData.Temp + '°');
   }
 
-  // const powerIndicator = document.getElementById('powerIndicator');
-  // powerIndicator.classList.toggle('on', statusData.Enabled === true);
+  const statusSection = document.querySelector('.status-section');
+  statusSection.classList.remove('status-cooling', 'status-heating', 'status-off', 'status-idle');
 
-  // const statusIndicator = document.getElementById('statusIndicator');
-  // // Update status indicator
-  // statusIndicator.classList.remove('blue', 'yellow', 'red');
-  // if (statusData.Task === 'Cool') {
-  //   statusIndicator.classList.add('blue');
-  // } else if (statusData.Task === 'Idle') {
-  //   statusIndicator.classList.add('yellow');
-  // } else if (statusData.Task === 'Off') {
-  //   statusIndicator.classList.add('red');
-  // }
+  // Update statusSection class (background color) based on current running status
+  if (statusData.Task.toLowerCase() === 'cool') {
+    statusSection.classList.add('status-cooling');
+  } else if (statusData.Task.toLowerCase() === 'heating') {
+    statusSection.classList.add('status-heating');
+  } else if (statusData.Task.toLowerCase() === 'off') {
+    statusSection.classList.add('status-off');
+  } else if (statusData.Task.toLowerCase() === 'idle') {
+    statusSection.classList.add('status-idle');
+  }
 
   // Store the current values as previous values for the next update
   previousStatusData = statusData;
