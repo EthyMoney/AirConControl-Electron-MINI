@@ -14,7 +14,7 @@ function createWindow() {
     },
     icon: path.join(__dirname, 'snow.ico'),
     fullscreen: true, // Optional: Open the window in fullscreen mode
-    frame: true // Optional: Remove window frame if desired
+    frame: false // Optional: Remove window frame if desired (needs to be false to hide mouse cursor)
   });
 
   // Hide the menu bar

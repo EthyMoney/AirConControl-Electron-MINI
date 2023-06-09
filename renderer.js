@@ -198,5 +198,5 @@ function disableButtonsTemporarily() {
   }, 1000); // Adjust the delay as needed (in milliseconds)
 }
 
-// Hide the cursor
+// Hide the mouse cursor (keep in mind this only works in frame-less mode, see main.js)
 document.body.style.cursor = "none";
