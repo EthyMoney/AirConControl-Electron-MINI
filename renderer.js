@@ -198,5 +198,18 @@ function disableButtonsTemporarily() {
   }, 1000); // Adjust the delay as needed (in milliseconds)
 }
 
-// Hide the mouse cursor (keep in mind this only works in frame-less mode, see main.js)
-document.body.style.cursor = "none";
+// The following is to hide the mouse cursor so it doesn't sit on the screen over app view
+let cursorTimeout;
+
+function hideCursor() {
+  document.body.style.cursor = 'none';
+}
+
+document.onmousemove = function () {
+  document.body.style.cursor = 'auto';
+  clearTimeout(cursorTimeout);
+  cursorTimeout = setTimeout(hideCursor, 3000); // hides the cursor after 3 seconds of inactivity
+}
+
+// Call this once to start the behavior
+cursorTimeout = setTimeout(hideCursor, 3000);
