@@ -1,7 +1,7 @@
 const mqtt = require('mqtt');
 
 // MQTT Broker Config
-const MQTT_BROKER_URL = 'mqtt://192.168.1.55';
+const MQTT_BROKER_URL = 'mqtt://100.106.238.5';
 const MQTT_TOPIC = 'home/shop/aircon';
 
 // MQTT Client
@@ -10,6 +10,8 @@ let client;
 // Connect to MQTT broker
 function connectToMqttBroker() {
   client = mqtt.connect(MQTT_BROKER_URL);
+
+  console.log('Connecting to MQTT broker...')
 
   // MQTT connection established
   client.on('connect', () => {
@@ -74,11 +76,12 @@ function updateStatusUI(statusData) {
     updateValueWithAnimation(currentStatusLabel, statusData.Task == 'Cool' ? 'Cooling' : statusData.Task == 'Heat' ? 'Heating' : statusData.Task == 'Off' ? 'Off' : 'Idle');
   }
 
+  // TODO put a power, compressor, fan, and mqtt AC pi comms status status label somewhere on the display
   // Update powerStatusLabel if value has changed
-  const powerStatusLabel = document.getElementById('powerStatusLabel');
-  if (hasValueChanged('Enabled', statusData.Enabled)) {
-    updateValueWithAnimation(powerStatusLabel, statusData.Enabled ? 'On' : 'Off');
-  }
+  // const powerStatusLabel = document.getElementById('powerStatusLabel');
+  // if (hasValueChanged('Enabled', statusData.Enabled)) {
+  //   updateValueWithAnimation(powerStatusLabel, statusData.Enabled ? 'On' : 'Off');
+  // }
 
   // Update setTemp if value has changed
   const setTemp = document.getElementById('setTemp');
@@ -194,3 +197,6 @@ function disableButtonsTemporarily() {
     tempIncreaseButton.disabled = false;
   }, 1000); // Adjust the delay as needed (in milliseconds)
 }
+
+// Hide the cursor
+document.body.style.cursor = "none";

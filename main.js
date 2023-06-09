@@ -5,25 +5,26 @@ const path = require('path');
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const mainWindow = new BrowserWindow({
-    width: height, // Swap width and height for vertical orientation
-    height: width,
+    width: width,
+    height: height,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
       enableRemoteModule: true
     },
     icon: path.join(__dirname, 'snow.ico'),
-    frame: false // Optional: Remove window frame if desired
+    fullscreen: true, // Optional: Open the window in fullscreen mode
+    frame: true // Optional: Remove window frame if desired
   });
 
   // Hide the menu bar
-  //mainWindow.setMenu(null);
+  mainWindow.setMenu(null);
 
   // Load the index.html file
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
   // Open the DevTools (optional)
-  // mainWindow.webContents.openDevTools();
+  mainWindow.webContents.openDevTools();
 
   // Handle window close event
   mainWindow.on('closed', function () {
