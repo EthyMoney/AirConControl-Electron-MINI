@@ -67,11 +67,10 @@ body {
   font-size: 18px;
 }
 
-.status-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
+.status-value {
+  font-size: 22px;
+  text-align: center;
+  font-weight: bold;
 }
 
 .status-label {

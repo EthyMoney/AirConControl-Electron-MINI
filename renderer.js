@@ -71,7 +71,7 @@ function updateStatusUI(statusData) {
   // Update currentStatusLabel if value has changed
   const currentStatusLabel = document.getElementById('currentStatusLabel');
   if (hasValueChanged('Task', statusData.Task)) {
-    updateValueWithAnimation(currentStatusLabel, statusData.Task);
+    updateValueWithAnimation(currentStatusLabel, statusData.Task == 'Cool' ? 'Cooling' : statusData.Task == 'Heat' ? 'Heating' : statusData.Task == 'Off' ? 'Off' : 'Idle');
   }
 
   // Update powerStatusLabel if value has changed
