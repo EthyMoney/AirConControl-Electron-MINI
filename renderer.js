@@ -1,7 +1,7 @@
 const mqtt = require('mqtt');
 
 // MQTT Broker Config
-const MQTT_BROKER_URL = 'mqtt://100.106.238.5';
+const MQTT_BROKER_URL = 'mqtt://192.168.1.55';
 const MQTT_TOPIC = 'home/shop/aircon';
 
 // MQTT Client
