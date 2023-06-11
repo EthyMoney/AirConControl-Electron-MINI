@@ -1,0 +1,14 @@
+#!/usr/bin/env xdg-open
+# This is an autostart .desktop file for use in Gnome desktop to launch the app using the begin.sh shell script.
+# This will launch the app in Gnome when the user logs in. (if automating, you may want to have an auto login user and configure the screen saver and sleep settings to never sleep)
+# To use this, copy this file to /etc/xdg/autostart (or wherever this is on your machine) and make sure it is executable.
+# You can also use Gnome settings to add this file to the startup applications list.
+# HINT: Make sure you either save this file from the linux device itself or use a text editor that saves in UNIX format. If this was saved on a windows machine, it will not work!
+# BE SURE TO TO CHANGE THE EXEC PATH BELOW TO THE BEGIN.SH SCRIPT LOCATION FOR YOUR SYSTEM
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ShopThermostat
+Terminal=false
+Exec='/home/logan/Desktop/AirConControl-Electron-MINI/begin.sh'
+Icon=utilities-terminal

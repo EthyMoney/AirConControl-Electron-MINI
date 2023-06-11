@@ -30,7 +30,7 @@ body {
 
 .title {
   text-align: center;
-  font-size: 24px;
+  font-size: 26px;
   font-weight: bold;
   margin-bottom: 10px;
 }
@@ -68,7 +68,7 @@ body {
 }
 
 .status-value {
-  font-size: 22px;
+  font-size: 28px;
   text-align: center;
   font-weight: bold;
 }
@@ -158,6 +158,7 @@ body {
 .control-buttons {
   display: flex;
   justify-content: space-evenly;
+  height: 50px;
 }
 
 .control-buttons button {
