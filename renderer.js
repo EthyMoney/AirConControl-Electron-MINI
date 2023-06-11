@@ -73,7 +73,7 @@ function updateStatusUI(statusData) {
   // Update currentStatusLabel if value has changed
   const currentStatusLabel = document.getElementById('currentStatusLabel');
   if (hasValueChanged('Task', statusData.Task)) {
-    updateValueWithAnimation(currentStatusLabel, statusData.Task == 'Cool' ? 'Cooling' : statusData.Task == 'Heat' ? 'Heating' : statusData.Task == 'Off' ? 'Off' : 'Idle');
+    updateValueWithAnimation(currentStatusLabel, statusData.Task == 'Cool' ? 'Cooling' : statusData.Task == 'Heat' ? 'Heating' : statusData.Task == 'OFF' ? 'Off' : 'Idle');
   }
 
   // TODO put a power, compressor, fan, and mqtt AC pi comms status status label somewhere on the display
