@@ -212,4 +212,4 @@ document.onmousemove = function () {
 }
 
 // Call this once to start the behavior
-cursorTimeout = setTimeout(hideCursor, 3000);
+cursorTimeout = setTimeout(hideCursor, 15000); // waits 15 seconds before hiding the cursor on startup (slow startup on some devices)
