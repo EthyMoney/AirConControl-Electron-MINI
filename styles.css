@@ -208,14 +208,15 @@ body {
 }
 */
 
-.light-mode .status-section {
-  background-color: #cccccc;
-  color: #333333;
+.light-mode .title {
+  color: black;
 }
 
-.light-mode .status-section status-valueh2 {
+.light-mode .status-section {
+  background-color: #cccccc;
   color: black;
-} 
+  box-shadow: 0 4px 8px #333333;
+}
 
 .light-mode .status-cooling {
   background-color: #bfe1ff;
@@ -239,12 +240,13 @@ body {
 
 .light-mode .temperature-section {
   background-color: #cccccc;
-  color: #333333;
+  color: black;
+  box-shadow: 0 4px 8px #333333;
 }
 
 .light-mode .control-buttons button {
   background-color: #cccccc;
-  color: #333333;
+  color: black;
   box-shadow: 0 2px 4px #333333;
 }
 
