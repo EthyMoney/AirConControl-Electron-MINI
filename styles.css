@@ -186,6 +186,12 @@ body {
   font-weight: bold;
 }
 
+.control-buttons button:active {
+  /* Darken the button for visual feedback */
+  background-color: #222222;
+  transition: background-color 0.3s ease;
+}
+
 /* hover styling, not wanted for touch interfaces (would stay in hover state after tap) */
 /*
 .light-mode .control-buttons button:hover {
