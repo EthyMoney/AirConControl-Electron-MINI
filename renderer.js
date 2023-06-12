@@ -198,18 +198,47 @@ function disableButtonsTemporarily() {
   }, 1000); // Adjust the delay as needed (in milliseconds)
 }
 
-// The following is to hide the mouse cursor so it doesn't sit on the screen over app view
-let cursorTimeout;
+//
+// Light/Dark Mode Theming
+//
+
+// Function to check if it's currently nighttime (after 7pm)
+function isNighttime() {
+  const now = new Date();
+  const hour = now.getHours();
+  //console.log('nighttime check: ' + hour + ' hours')
+  //console.log('nighttime check: ' + (hour >= 19 || hour < 6))
+  return hour >= 19 || hour < 6; // Nighttime is from 7pm to 5:59am
+}
+
+// Function to toggle between light and dark mode
+function toggleLightMode() {
+  const container = document.querySelector('.container');
+  container.classList.toggle('light-mode');
+}
+
+function checkAndSetTheme() {
+  const nightTime = isNighttime();
+  if (nightTime && document.querySelector('.container').classList.contains('light-mode')) {
+    toggleLightMode();
+  } else if (!nightTime && !document.querySelector('.container').classList.contains('light-mode')) {
+    toggleLightMode();
+  }
+}
+
+// Check the time every minute and update the mode if necessary
+setInterval(() => checkAndSetTheme(), 60000); // Check every minute (adjust the interval as desired)
+
+// Set the theme initially
+checkAndSetTheme();
+
+// Hide the mouse cursor
+document.body.style.cursor = 'none';
+
+// Add event listeners to keep the cursor hidden
+document.addEventListener('mousemove', hideCursor);
+document.addEventListener('touchmove', hideCursor);
 
 function hideCursor() {
   document.body.style.cursor = 'none';
 }
-
-document.onmousemove = function () {
-  document.body.style.cursor = 'auto';
-  clearTimeout(cursorTimeout);
-  cursorTimeout = setTimeout(hideCursor, 3000); // hides the cursor after 3 seconds of inactivity
-}
-
-// Call this once to start the behavior
-cursorTimeout = setTimeout(hideCursor, 15000); // waits 15 seconds before hiding the cursor on startup (slow startup on some devices)

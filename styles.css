@@ -12,6 +12,7 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
+  cursor: none;
 }
 
 .container {
@@ -26,6 +27,12 @@ body {
   padding: 20px;
   background-color: #222222;
   color: #ffffff;
+}
+
+.light-mode {
+  /* Light mode styles */
+  background-color: #ffffff;
+  color: #333333;
 }
 
 .title {
@@ -140,6 +147,8 @@ body {
 .temperature-buttons button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  /* Hide disabled cursor icon */
+  cursor: none;
 }
 
 .temperature-buttons button.decrease {
@@ -150,10 +159,13 @@ body {
   background-color: #ff5555;
 }
 
+/* hover styling, not wanted for touch interfaces (would stay in hover state after tap) */
+/*
 .temperature-buttons button:hover {
   background-color: #444444;
   color: white;
 }
+*/
 
 .control-buttons {
   display: flex;
@@ -171,4 +183,67 @@ body {
   outline: none;
   cursor: pointer;
   color: white;
+  font-weight: bold;
+}
+
+/* hover styling, not wanted for touch interfaces (would stay in hover state after tap) */
+/*
+.light-mode .control-buttons button:hover {
+  background-color: #f2f2f2;
+  color: #333333;
+}
+*/
+
+/* hover styling, not wanted for touch interfaces (would stay in hover state after tap) */
+/*
+.light-mode .temperature-buttons button:hover {
+  background-color: #cccccc;
+  color: #333333;
+}
+*/
+
+.light-mode .status-section {
+  background-color: #cccccc;
+  color: #333333;
+}
+
+.light-mode .status-section status-valueh2 {
+  color: black;
+} 
+
+.light-mode .status-cooling {
+  background-color: #bfe1ff;
+  color: black;
+}
+
+.light-mode .status-heating {
+  background-color: #ffcccc;
+  color: black;
+}
+
+.light-mode .status-off {
+  background-color: #cccccc;
+  color: black;
+}
+
+.light-mode .status-idle {
+  background-color: #d9df96;
+  color: black;
+}
+
+.light-mode .temperature-section {
+  background-color: #cccccc;
+  color: #333333;
+}
+
+.light-mode .control-buttons button {
+  background-color: #cccccc;
+  color: #333333;
+  box-shadow: 0 2px 4px #333333;
+}
+
+/* Cursor style over buttons */
+.control-buttons button,
+.temperature-buttons button {
+  cursor: none;
 }
