@@ -35,11 +35,49 @@ body {
   color: #333333;
 }
 
+.status-bar {
+  position: absolute;
+  margin-top: 26px;
+  top: 0;
+  left: 0;
+  width: 100%;
+  background-color: #333333;
+  color: #ffffff;
+  font-size: 14px;
+  display: grid;
+}
+
+.light-mode .status-bar {
+  background-color: #ffffff;
+  color: black;
+}
+
+.status-bar div {
+  margin-top: -20px;
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+#current-time {
+  font-weight: bold;
+  text-align: center;
+}
+
+#outside-temperature {
+  font-weight: bold;
+  text-align: left;
+}
+
+#outside-humidity {
+  font-weight: bold;
+  text-align: right;
+}
+
 .title {
   text-align: center;
   font-size: 26px;
   font-weight: bold;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
 }
 
 .status-section {

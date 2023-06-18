@@ -2,7 +2,8 @@ const mqtt = require('mqtt');
 
 // MQTT Broker Config
 const MQTT_BROKER_URL = 'mqtt://192.168.1.55';
-const MQTT_TOPIC = 'home/shop/aircon';
+const MQTT_TOPIC_AIRCON = 'home/shop/aircon';
+const MQTT_TOPIC_TEMPEST_STATS = 'homeassistant/sensor/weatherflow2mqtt_ST-00095605/observation/state';
 
 // MQTT Client
 let client;
@@ -19,24 +20,31 @@ function connectToMqttBroker() {
     sendStatusRequest();
   });
 
-  // Handle MQTT message received
+  // Handle MQTT message received on aircon topic
   client.on('message', (topic, message) => {
-    if (topic === MQTT_TOPIC) {
-      handleMqttMessage(message.toString());
+    if (topic === MQTT_TOPIC_AIRCON) {
+      handleMqttMessageAircon(message.toString());
+    }
+  });
+
+  // Handle MQTT message received on tempest stats topic
+  client.on('message', (topic, message) => {
+    if (topic === MQTT_TOPIC_TEMPEST_STATS) {
+      handleMqttMessageTempestStats(message.toString());
     }
   });
 
   // Subscribe to MQTT topic
-  client.subscribe(MQTT_TOPIC);
+  client.subscribe(MQTT_TOPIC_AIRCON);
 }
 
 // Send status request to MQTT topic
 function sendStatusRequest() {
-  client.publish(MQTT_TOPIC, 'status');
+  client.publish(MQTT_TOPIC_AIRCON, 'status');
 }
 
 // Handle MQTT message
-function handleMqttMessage(message) {
+function handleMqttMessageAircon(message) {
   let jsonData;
   try {
     jsonData = JSON.parse(message);
@@ -49,6 +57,18 @@ function handleMqttMessage(message) {
   updateStatusUI(jsonData);
 }
 
+// Handle MQTT message for tempest stats
+function handleMqttMessageTempestStats(message) {
+  let jsonData;
+  try {
+    jsonData = JSON.parse(message);
+  } catch (error) {
+    console.error('Failed to parse MQTT message:', error);
+    return;
+  }
+  updateStatusBarStats(jsonData);
+}
+
 // Store the previous values
 let previousStatusData = {
   Enabled: null,
@@ -56,6 +76,39 @@ let previousStatusData = {
   Temp: null,
   SetTemp: null
 };
+
+function updateStatusBarStats(statusData) {
+  // Update outside temperature and humidity
+  const outsideTemperatureElement = document.getElementById('outside-temperature');
+  outsideTemperatureElement.textContent = `${statusData.air_temperature}°F`;
+  const outsideHumidityElement = document.getElementById('outside-humidity');
+  outsideHumidityElement.textContent = `${statusData.relative_humidity.toPrecision(1)}%`;
+}
+
+function updateStatusBarTime(){
+  // Update current time
+  const date = new Date();
+  let hours = date.getHours();
+  let minutes = date.getMinutes();
+  let ampm = hours >= 12 ? 'PM' : 'AM';
+
+  // Convert to 12-hour format
+  hours = hours % 12 || 12;
+
+  // Add leading zeros to minutes if necessary
+  minutes = minutes < 10 ? '0' + minutes : minutes;
+
+  // Set formatted time
+  const currentTime = hours + ':' + minutes + ' ' + ampm;
+  const currentTimeElement = document.getElementById('current-time');
+  currentTimeElement.textContent = `${currentTime}`;
+}
+
+// schedule time update every 5 seconds
+setInterval(updateStatusBarTime, 5000);
+
+// first run time update
+updateStatusBarTime();
 
 // Update UI with status data
 function updateStatusUI(statusData) {
@@ -126,7 +179,7 @@ function triggerValueChangeAnimation(element) {
 
 // Publish MQTT message
 function publishMqttMessage(message) {
-  client.publish(MQTT_TOPIC, message);
+  client.publish(MQTT_TOPIC_AIRCON, message);
 }
 
 // Start the app
