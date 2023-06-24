@@ -8,6 +8,11 @@ const MQTT_TOPIC_TEMPEST_STATS = 'homeassistant/sensor/weatherflow2mqtt_ST-00095
 // MQTT Client
 let client;
 
+// Tracking last interaction time for the temperature change buttons
+let lastInteractionTime = Date.now();
+let temperatureChangeTimeout;
+let tempSetTemp;
+
 // Connect to MQTT broker
 function connectToMqttBroker() {
   client = mqtt.connect(MQTT_BROKER_URL);
@@ -46,15 +51,20 @@ function sendStatusRequest() {
 // Handle MQTT message
 function handleMqttMessageAircon(message) {
   let jsonData;
-  try {
-    jsonData = JSON.parse(message);
-  } catch (error) {
-    console.error('Failed to parse MQTT message:', error);
+  // ignore message if it is a status, set temp, or power on/off request
+  if (message === 'status' || message.includes('set-') || message === 'on' || message === 'off') {
     return;
   }
-
-  // Update UI with status data
-  updateStatusUI(jsonData);
+  else {
+    try {
+      jsonData = JSON.parse(message);
+    } catch (error) {
+      console.error('Failed to parse MQTT message:', error);
+      return;
+    }
+    // Update UI with status data
+    updateStatusUI(jsonData);
+  }
 }
 
 // Handle MQTT message for tempest stats
@@ -85,7 +95,7 @@ function updateStatusBarStats(statusData) {
   outsideHumidityElement.textContent = `${statusData.relative_humidity.toFixed(1)}% H`;
 }
 
-function updateStatusBarTime(){
+function updateStatusBarTime() {
   // Update current time
   const date = new Date();
   let hours = date.getHours();
@@ -117,12 +127,6 @@ function updateStatusUI(statusData) {
     return previousStatusData[key] !== value;
   }
 
-  // Helper function to update the value and trigger animation
-  function updateValueWithAnimation(element, value) {
-    element.textContent = value;
-    triggerValueChangeAnimation(element);
-  }
-
   // Update currentStatusLabel if value has changed
   const currentStatusLabel = document.getElementById('currentStatusLabel');
   if (hasValueChanged('Task', statusData.Task)) {
@@ -140,6 +144,8 @@ function updateStatusUI(statusData) {
   const setTemp = document.getElementById('setTemp');
   if (hasValueChanged('SetTemp', statusData.SetTemp)) {
     updateValueWithAnimation(setTemp, statusData.SetTemp + '°');
+    // update the locally-tracked setTemp
+    tempSetTemp = statusData.SetTemp;
   }
 
   // Update currentTemp if value has changed
@@ -167,14 +173,20 @@ function updateStatusUI(statusData) {
 }
 
 // Function to trigger the value change animation
-function triggerValueChangeAnimation(element) {
+function triggerValueChangeAnimation(element, timeout = 1000) {
   // Add the "value-change" class to the element
   element.classList.add('value-change');
 
   // Remove the "value-change" class after a delay
   setTimeout(() => {
     element.classList.remove('value-change');
-  }, 1000); // Adjust the duration as needed (in milliseconds)
+  }, timeout); // Adjust the duration as needed (in milliseconds)
+}
+
+// Helper function to update the value and trigger animation
+function updateValueWithAnimation(element, value, timeout) {
+  element.textContent = value;
+  triggerValueChangeAnimation(element, timeout);
 }
 
 // Publish MQTT message
@@ -205,15 +217,13 @@ const tempIncreaseButton = document.getElementById('tempIncreaseButton');
 // Add click event listeners to the temp buttons
 tempDecreaseButton.addEventListener('click', () => {
   if (!buttonsDisabled) {
-    updateSetTemperature(-1);
-    disableButtonsTemporarily();
+    handleTemperatureChange(-1);
   }
 });
 
 tempIncreaseButton.addEventListener('click', () => {
   if (!buttonsDisabled) {
-    updateSetTemperature(1);
-    disableButtonsTemporarily();
+    handleTemperatureChange(1);
   }
 });
 
@@ -224,8 +234,9 @@ function updateSetTemperature(change) {
 
   // Check if the new set temperature is within the valid range
   if (newSetTemp >= 50 && newSetTemp <= 90) {
-    setTemp.textContent = newSetTemp + '°';
-
+    const setTemp = document.getElementById('setTemp');
+    setTemp.textContent = newSetTemp + '°'; // no animation
+    //updateValueWithAnimation(setTemp, newSetTemp + '°', 250); // with animation
     const message = `set-${newSetTemp}`;
     publishMqttMessage(message);
   }
@@ -234,7 +245,7 @@ function updateSetTemperature(change) {
 // Flag to track button disable state
 let buttonsDisabled = false;
 
-// Function to disable buttons temporarily
+// Function to disable buttons temporarily (to prevent rapid spam pressing where MQTT messages are sent too quickly)
 function disableButtonsTemporarily() {
   // Set the flag to true
   buttonsDisabled = true;
@@ -249,6 +260,39 @@ function disableButtonsTemporarily() {
     tempDecreaseButton.disabled = false;
     tempIncreaseButton.disabled = false;
   }, 1000); // Adjust the delay as needed (in milliseconds)
+}
+
+// Function to handle temperature change with a delay before sending the MQTT message
+function handleTemperatureChange(change) {
+  const currentTime = Date.now();
+  const currentSetTemp = parseInt(setTemp.textContent, 10);
+  const newSetTemp = currentSetTemp + change;
+
+  // Check if the new set temperature is within the valid range
+  if (newSetTemp >= 50 && newSetTemp <= 90) {
+    const setTemp = document.getElementById('setTemp');
+    setTemp.textContent = newSetTemp + '°'; // no animation
+    //updateValueWithAnimation(setTemp, newSetTemp + '°', 250); // with animation
+    tempSetTemp = newSetTemp;
+  }
+
+  // Check if enough time has passed since the last interaction
+  if (currentTime - lastInteractionTime >= 3000) {
+    // Update the last interaction time
+    lastInteractionTime = currentTime;
+
+    // Clear the previous timeout if it exists
+    if (temperatureChangeTimeout) {
+      clearTimeout(temperatureChangeTimeout);
+    }
+
+    // Create a new timeout to send the temperature after 3 seconds
+    temperatureChangeTimeout = setTimeout(() => {
+      // Perform the temperature change and send the new value over MQTT
+      const message = `set-${tempSetTemp}`;
+      publishMqttMessage(message);
+    }, 5000);
+  }
 }
 
 //

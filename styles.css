@@ -15,6 +15,33 @@ body {
   cursor: none;
 }
 
+.value-change {
+  animation-name: value-change-animation;
+  animation-duration: 1s;
+  /* Adjust the duration as needed */
+  animation-timing-function: ease-in-out;
+  /* Adjust the timing function as needed */
+  animation-fill-mode: forwards;
+  /* Keeps the element in its final state after the animation ends */
+}
+
+@keyframes value-change-animation {
+  0% {
+    /* Initial state of the element */
+    opacity: 0;
+  }
+
+  50% {
+    /* Intermediate state (if desired) */
+    /* Add any desired intermediate animation properties here */
+  }
+
+  100% {
+    /* Final state of the element */
+    opacity: 1;
+  }
+}
+
 .container {
   transform: rotate(-90deg);
   transform-origin: center center;
