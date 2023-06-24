@@ -25,17 +25,17 @@ function connectToMqttBroker() {
     if (topic === MQTT_TOPIC_AIRCON) {
       handleMqttMessageAircon(message.toString());
     }
-  });
-
-  // Handle MQTT message received on tempest stats topic
-  client.on('message', (topic, message) => {
+    // tempest observation stats topic
     if (topic === MQTT_TOPIC_TEMPEST_STATS) {
       handleMqttMessageTempestStats(message.toString());
     }
   });
 
-  // Subscribe to MQTT topic
+  // Subscribe to MQTT topic for aircon
   client.subscribe(MQTT_TOPIC_AIRCON);
+
+  // Subscribe to MQTT topic for tempest stats
+  client.subscribe(MQTT_TOPIC_TEMPEST_STATS);
 }
 
 // Send status request to MQTT topic
@@ -80,9 +80,9 @@ let previousStatusData = {
 function updateStatusBarStats(statusData) {
   // Update outside temperature and humidity
   const outsideTemperatureElement = document.getElementById('outside-temperature');
-  outsideTemperatureElement.textContent = `${statusData.air_temperature}°F`;
+  outsideTemperatureElement.textContent = `${statusData.air_temperature} °F`;
   const outsideHumidityElement = document.getElementById('outside-humidity');
-  outsideHumidityElement.textContent = `${statusData.relative_humidity.toPrecision(1)}%`;
+  outsideHumidityElement.textContent = `${statusData.relative_humidity.toFixed(1)}% H`;
 }
 
 function updateStatusBarTime(){
