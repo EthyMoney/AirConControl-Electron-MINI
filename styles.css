@@ -118,6 +118,11 @@ body {
   color: black;
 }
 
+.status-error {
+  background-color: #ff5555;
+  color: black;
+}
+
 .status-heating {
   background-color: #ffcccc;
   color: black;

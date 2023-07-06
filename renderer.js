@@ -13,6 +13,38 @@ let lastInteractionTime = Date.now();
 let temperatureChangeTimeout;
 let tempSetTemp;
 
+// Tracking time of last received status message
+let lastStatusMessageTime = Date.now();
+
+// Check every 5 minutes to see if the last status message was received more than 5 minutes ago
+setInterval(() => {
+  const currentTime = Date.now();
+  if (currentTime - lastStatusMessageTime >= 300000) {
+    // If the last status message was received more than 5 minutes ago, reconnect to the MQTT broker
+    console.log('Reconnecting to MQTT broker...');
+    const currentStatusLabel = document.getElementById('currentStatusLabel');
+    updateValueWithAnimation(currentStatusLabel, 'Reconnecting...');
+    client.end();
+    connectToMqttBroker();
+    // Wait a minute and check again to see if a status message has been received now
+    setTimeout(() => {
+      if (currentTime - lastStatusMessageTime >= 300000) {
+        // If still no status message received, show an error message
+        updateValueWithAnimation(currentStatusLabel, 'Lost Connection');
+        // Set the status section class to error
+        const statusSection = document.querySelector('.status-section');
+        statusSection.classList.remove('status-cooling', 'status-heating', 'status-off', 'status-idle');
+        statusSection.classList.add('status-error');
+        // Set the set temperature and current temperature to dashes
+        const setTemp = document.getElementById('setTemp');
+        const currentTemp = document.getElementById('currentTemp');
+        setTemp.textContent = '--';
+        currentTemp.textContent = '--';
+      }
+    }, 60000);
+  }
+}, 300000);
+
 // Connect to MQTT broker
 function connectToMqttBroker() {
   client = mqtt.connect(MQTT_BROKER_URL);
@@ -62,6 +94,8 @@ function handleMqttMessageAircon(message) {
       console.error('Failed to parse MQTT message:', error);
       return;
     }
+    // Update last status message time
+    lastStatusMessageTime = Date.now();
     // Update UI with status data
     updateStatusUI(jsonData);
   }
@@ -133,7 +167,7 @@ function updateStatusUI(statusData) {
     updateValueWithAnimation(currentStatusLabel, statusData.Task == 'Cool' ? 'Cooling' : statusData.Task == 'Heat' ? 'Heating' : statusData.Task == 'OFF' ? 'Off' : 'Idle');
   }
 
-  // TODO put a power, compressor, fan, and mqtt AC pi comms status status label somewhere on the display
+  // TODO put a power, compressor, fan, mqtt AC pico comms, and runtime status status labels somewhere on the display
   // Update powerStatusLabel if value has changed
   // const powerStatusLabel = document.getElementById('powerStatusLabel');
   // if (hasValueChanged('Enabled', statusData.Enabled)) {
@@ -155,7 +189,7 @@ function updateStatusUI(statusData) {
   }
 
   const statusSection = document.querySelector('.status-section');
-  statusSection.classList.remove('status-cooling', 'status-heating', 'status-off', 'status-idle');
+  statusSection.classList.remove('status-cooling', 'status-heating', 'status-off', 'status-idle', 'status-error');
 
   // Update statusSection class (background color) based on current running status
   if (statusData.Task.toLowerCase() === 'cool') {
