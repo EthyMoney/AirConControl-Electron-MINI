@@ -16,6 +16,9 @@ let tempSetTemp;
 // Tracking time of last received status message
 let lastStatusMessageTime = Date.now();
 
+// Tracking time of last received tempest stats message
+let lastTempestStatsMessageTime = Date.now();
+
 // Check every 5 minutes to see if the last status message was received more than 5 minutes ago
 setInterval(() => {
   const currentTime = Date.now();
@@ -38,12 +41,31 @@ setInterval(() => {
         // Set the set temperature and current temperature to dashes
         const setTemp = document.getElementById('setTemp');
         const currentTemp = document.getElementById('currentTemp');
+        // clear the locally-tracked previous status data (to ensure the next status update will be processed as a change when we reconnect)
+        previousStatusData = {
+          Enabled: null,
+          Task: null,
+          Temp: null,
+          SetTemp: null
+        };
         setTemp.textContent = '--';
         currentTemp.textContent = '--';
       }
     }, 60000);
   }
 }, 300000);
+
+// Check every 15 minutes to see if a tempest stats message has been received in the last 15 minutes
+setInterval(() => {
+  const currentTime = Date.now();
+  if (currentTime - lastTempestStatsMessageTime >= 900000) {
+    // If a tempest stats message has not been received in the last 10 minutes, change the temp and humidity values to n/a
+    const outsideTemperatureElement = document.getElementById('outside-temperature');
+    const outsideHumidityElement = document.getElementById('outside-humidity');
+    outsideTemperatureElement.textContent = 'n/a °F';
+    outsideHumidityElement.textContent = 'n/a% H';
+  }
+}, 900000);
 
 // Connect to MQTT broker
 function connectToMqttBroker() {
@@ -110,6 +132,9 @@ function handleMqttMessageTempestStats(message) {
     console.error('Failed to parse MQTT message:', error);
     return;
   }
+  // Update last tempest stats message time
+  lastTempestStatsMessageTime = Date.now();
+  // Update UI with tempest stats data
   updateStatusBarStats(jsonData);
 }
 
