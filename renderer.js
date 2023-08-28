@@ -1,7 +1,7 @@
 const mqtt = require('mqtt');
 
 // MQTT Broker Config
-const MQTT_BROKER_URL = 'mqtt://192.168.1.55';
+const MQTT_BROKER_URL = 'mqtt://192.168.1.216';
 const MQTT_TOPIC_AIRCON = 'home/shop/aircon';
 const MQTT_TOPIC_TEMPEST_STATS = 'homeassistant/sensor/weatherflow2mqtt_ST-00095605/observation/state';
 
