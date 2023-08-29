@@ -9,6 +9,6 @@
     "electron": "^26.1.0"
   },
   "dependencies": {
-    "mqtt": "^5.0.3"
+    "mqtt": "^4.3.7"
   }
 }
