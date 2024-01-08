@@ -6,9 +6,9 @@
     "start": "electron ."
   },
   "devDependencies": {
-    "electron": "^26.3.0"
+    "electron": "^28.1.1"
   },
   "dependencies": {
-    "mqtt": "^4.3.7"
+    "mqtt": "^4.3.8"
   }
 }
