@@ -15,9 +15,8 @@ To set up the Air Conditioning Control App, follow these steps:
 1. Clone the repository: `git clone https://github.com/EthyMoney/AirConControl-Electron-MINI.git`
 2. Install the required dependencies: `npm install`
 3. Configure the MQTT broker URL and topic in the `renderer.js` file.
-4. Build the frontend assets: `npm run build`
-5. Start the server: `npm start`
-6. Access the app in your web browser at `http://localhost:3000`
+4. Start the app: `npm start`
+5. Using a 3.5" SPI TFT display connected right on top of a Raspberry Pi? Try the `installer.sh` script to install the driver, display manager, touch calibration and autologin/auto-start the app on boot. Change the username in the top of the script to your username and adjust the path to the app if needed in the `autostart` file contents.
 
 ## Usage
 
