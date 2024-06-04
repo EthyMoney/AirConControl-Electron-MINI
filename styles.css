@@ -278,6 +278,8 @@ body {
 }
 */
 
+/*! Light Mode Styles */
+
 .light-mode .title {
   color: black;
 }
@@ -290,6 +292,11 @@ body {
 
 .light-mode .status-cooling {
   background-color: #bfe1ff;
+  color: black;
+}
+
+.light-mode .status-error {
+  background-color: #ff5555;
   color: black;
 }
 
