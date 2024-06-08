@@ -60,6 +60,7 @@ echo ""
 
 npm i n -g
 n lts
+hash -r
 npm i -g npm
 npm i -g npm-check-updates eslint ts-node typescript pm2
 hash -r
@@ -190,8 +191,12 @@ echo ""
 echo "Configuration triggers complete."
 echo ""
 
+echo ""
+echo "====== Installing and Configuring Display and Touch Screen Drivers ======"
+echo ""
+
 # Aight, now let's install and configure the display and touch capabilities, assuming a 3.5" SPI display, adjust as needed for others (LCD-Show has multiple versions of the setup scripts)
-cd ~
+cd /home/$USERNAME
 
 git clone https://github.com/goodtft/LCD-show.git
 chmod -R 755 LCD-show
@@ -202,14 +207,14 @@ sed -i -e "s/sudo reboot//" LCD35-show
 
 ./LCD35-show
 
-cd ~
+cd /home/$USERNAME
 
 # if needed, rotate:
 # cd LCD-show/
 # sudo ./rotate.sh 90
 
 # Install the calibration tool
-cp LCD-show/xinput-calibrator_0.7.5-1_armhf.deb ~/
+cp LCD-show/xinput-calibrator_0.7.5-1_armhf.deb /home/$USERNAME
 
 # To run the calibration tool:
 # DISPLAY=:0.0 xinput_calibrator
@@ -233,6 +238,26 @@ EndSection' | tee /etc/X11/xorg.conf.d/99-calibration.conf > /dev/null
 # Replace dtoverlay=tft35a:rotate=90 with dtoverlay=tft35a:rotate=90,speed=24000000,fps=60 at /boot/config.txt
 sed -i -e "s/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=90,speed=24000000,fps=60/" /boot/config.txt
 # Note, the above line is what you need to change if you wish to rotate the display orientation or attempt to change the speed or fps on a different display
+
+echo ""
+echo "  ---- Display and touch screen drivers installed and configured. ----"
+echo ""
+
+echo ""
+echo "====== Installing Thermostat Application ======"
+echo ""
+
+# Clone the thermostat application
+cd /home/$USERNAME
+git clone https://github.com/EthyMoney/AirConControl-Electron-MINI.git
+
+# Install the application dependencies
+cd AirConControl-Electron-MINI
+npm install
+
+echo ""
+echo "  ---- Thermostat application installed. ----"
+echo ""
 
 # Now prompt the user to reboot with a default of yes
 echo ""
