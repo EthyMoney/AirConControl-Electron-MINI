@@ -52,7 +52,7 @@ echo ""
 
 #! YOU WILL BE ASKED ABOUT PICKING A DISPLAY MANAGER DUE TO HAVEING BOTH INSTALLED, SELECT NODM WHEN PROMPTED!!!!
 
-apt install vnstat neofetch nodm lightdm compton xserver-xorg xserver-xorg-input-all xinit x11-xserver-utils xserver-xorg-core xserver-xorg-video-all openbox feh plymouth-themes plymouth-label npm wavemon -y
+apt install vnstat neofetch git nodm lightdm compton xserver-xorg xserver-xorg-input-all xinit x11-xserver-utils xserver-xorg-core xserver-xorg-video-all openbox feh plymouth-themes plymouth-label npm wavemon -y
 
 echo ""
 echo "====== Installing Updated Node.js and NPM + Global Packages ======"
@@ -80,7 +80,6 @@ echo ""
 # Create the autostart file at /home/$USERNAME/.config/openbox/autostart
 mkdir -p /home/$USERNAME/.config/openbox
 cat << 'EOF' > /home/$USERNAME/.config/openbox/autostart
-#!/bin/bash
 
 # Disable screen saver and power management
 xset s off
@@ -255,6 +254,9 @@ git clone https://github.com/EthyMoney/AirConControl-Electron-MINI.git
 cd AirConControl-Electron-MINI
 npm install
 
+# Set username as the owner of the application files
+chown -R $USERNAME:$USERNAME /home/$USERNAME/AirConControl-Electron-MINI
+
 echo ""
 echo "  ---- Thermostat application installed. ----"
 echo ""
@@ -263,18 +265,11 @@ echo ""
 echo ""
 echo ""
 read -p "All done! Would you like to reboot now? (You'll need to before this all works anyways) [Y/n] " -n 1 -r
+REPLY=${REPLY:-Y}
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
   reboot
 fi
-
-# If the user didn't want to reboot, let them know they need to reboot for the changes to take effect
-echo ""
-echo ""
-echo "  ---- If you are reading this, please reboot your system when possible for the changes to take effect. Have a great day!"
-echo ""
-echo ""
-
 # End of script
 
 # For the record, the display setup stuff came from here:
