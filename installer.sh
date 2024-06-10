@@ -3,6 +3,8 @@
 # This will set up a new fresh pi running pi os lite for booting into minimal display manager and running the app
 # This will also install and configure the SPI display and touch screen drivers
 
+# Tested working on Pi 4, but on Pi 3 the openbox session does not start and instead we get stuck at a logged in terminal.
+
 USERNAME="logan"
 
 # Check for root privileges
@@ -131,45 +133,6 @@ sed -i 's/#autologin-user=/autologin-user=$USERNAME/' /etc/lightdm/lightdm.conf
 
 echo ""
 echo "LightDM autologin configured."
-echo ""
-
-echo ""
-echo "====== Writing Xorg Configuration ======"
-echo ""
-
-# Create Xorg configuration file for the SPI display
-mkdir -p /etc/X11/xorg.conf.d/
-tee /etc/X11/xorg.conf.d/99-fbdev.conf > /dev/null << EOF
-Section "Device"
-    Identifier "spi0.0"
-    Driver "fbdev"
-    Option "fbdev" "/dev/fb1"
-EndSection
-
-Section "Monitor"
-    Identifier "PrimaryMonitor"
-    Option "DPMS" "false"
-EndSection
-
-Section "Screen"
-    Identifier "PrimaryScreen"
-    Device "spi0.0"
-    Monitor "PrimaryMonitor"
-    DefaultDepth 16
-    SubSection "Display"
-        Depth 16
-        Modes "480x320"
-    EndSubSection
-EndSection
-
-Section "ServerLayout"
-    Identifier "PrimaryLayout"
-    Screen "PrimaryScreen"
-EndSection
-EOF
-
-echo ""
-echo "Xorg configuration written."
 echo ""
 
 echo ""
