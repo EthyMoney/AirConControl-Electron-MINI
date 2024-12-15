@@ -3,7 +3,8 @@
 # This will set up a new fresh pi running pi os lite for booting into minimal display manager and running the app
 # This will also install and configure the SPI display and touch screen drivers
 
-# Tested working on Pi 4, but on Pi 3 the openbox session does not start and instead we get stuck at a logged in terminal.
+# With x64 Pi OS Bookworm Lite: Tested working on Pi 4, but on Pi 3 the openbox session does not start and instead we get stuck at a logged in terminal.
+# As a workaround for the Pi 3, you can use the 32-bit Pi OS Bullseye (legacy) Lite, which works fine with this script. Maybe 64-bit Bullseye Lite works too, but I haven't tested it. I tested 32-bit Bullseye Lite on a Pi 3 and it worked fine.
 
 USERNAME="logan"
 
