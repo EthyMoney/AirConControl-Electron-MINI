@@ -53,9 +53,7 @@ echo ""
 echo "====== Installing APT Packages ======"
 echo ""
 
-#! YOU WILL BE ASKED ABOUT PICKING A DISPLAY MANAGER DUE TO HAVEING BOTH INSTALLED, SELECT NODM WHEN PROMPTED!!!!
-
-apt install vnstat neofetch git nodm lightdm compton xserver-xorg xserver-xorg-input-all xinit x11-xserver-utils xserver-xorg-core xserver-xorg-video-all openbox feh plymouth-themes plymouth-label npm wavemon -y
+apt install vnstat neofetch git lightdm compton net-tools nodm xserver-xorg xserver-xorg-input-all xinit x11-xserver-utils xserver-xorg-core xserver-xorg-video-all openbox npm wavemon -y
 
 echo ""
 echo "====== Installing Updated Node.js and NPM + Global Packages ======"
@@ -76,20 +74,17 @@ echo ""
 sed -i -e "s/NODM_ENABLED=false/NODM_ENABLED=true/" -e "s/NODM_USER=root/NODM_USER=$USERNAME/" \
   /etc/default/nodm
 
-echo ""
-echo "Minimal display manager configured."
-echo ""
-
 # Create the autostart file at /home/$USERNAME/.config/openbox/autostart
 mkdir -p /home/$USERNAME/.config/openbox
 cat << 'EOF' > /home/$USERNAME/.config/openbox/autostart
+#!/bin/bash
 
 # Disable screen saver and power management
 xset s off
 xset -dpms
 xset s noblank
 
-# Comption for display performance and vsync
+# Compton for display performance and vsync
 compton -b &
 
 # Environment variables for Node.js and npm
@@ -107,7 +102,7 @@ EOF
 # Ensure the script is executable
 chmod +x /home/$USERNAME/.config/openbox/autostart
 
-# Create xsession file to launch openbox (required for nodm on ubuntu, this isn't needed on Raspberry Pi OS but doesn't hurt to do anyways)
+# Create xsession file to launch openbox
 echo "#!/bin/bash" > /home/$USERNAME/.xsession
 echo "xset s off" >> /home/$USERNAME/.xsession
 echo "xset -dpms" >> /home/$USERNAME/.xsession
@@ -128,9 +123,11 @@ echo ""
 echo "====== Configuring LightDM Autologin ======"
 echo ""
 
-# Configure LightDM autologin using nodm as the display manager (same as using raspi-config and selecting "Desktop Autologin")
-# This fails silently on a non-Raspberry Pi system, this will just skip and continue when it fails, all good because nodm was configured above
-sed -i 's/#autologin-user=/autologin-user=$USERNAME/' /etc/lightdm/lightdm.conf
+# Configure LightDM autologin
+sed -i "s/#autologin-user=/autologin-user=$USERNAME/" /etc/lightdm/lightdm.conf
+sed -i "s/#autologin-session=/autologin-session=openbox/" /etc/lightdm/lightdm.conf
+sed -i 's/^user-session=.*/user-session=openbox/' /etc/lightdm/lightdm.conf
+sed -i 's/^autologin-session=.*/autologin-session=openbox/' /etc/lightdm/lightdm.conf
 
 echo ""
 echo "LightDM autologin configured."
@@ -140,6 +137,9 @@ echo ""
 echo "====== Processing Pi Configuration Special Triggers ======"
 echo ""
 
+sed -i 's/console=tty1/console=tty3/' /boot/firmware/cmdline.txt
+sed -i 's/$/ quiet splash plymouth.ignore-serial-consoles logo.nologo loglevel=3/' /boot/firmware/cmdline.txt
+raspi-config nonint do_boot_splash 0
 raspi-config nonint do_boot_behaviour B4
 
 # Config adjustments for display performance using compton
