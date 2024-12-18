@@ -137,8 +137,16 @@ echo ""
 echo "====== Processing Pi Configuration Special Triggers ======"
 echo ""
 
-sed -i 's/console=tty1/console=tty3/' /boot/firmware/cmdline.txt
-sed -i 's/$/ quiet splash plymouth.ignore-serial-consoles logo.nologo loglevel=3/' /boot/firmware/cmdline.txt
+MODEL=$(raspi-config nonint get_pi_type)
+
+if [ "$MODEL" -ge 4 ]; then
+    sed -i 's/console=tty1/console=tty3/' /boot/firmware/cmdline.txt
+    sed -i 's/$/ quiet splash plymouth.ignore-serial-consoles logo.nologo loglevel=3/' /boot/firmware/cmdline.txt
+else
+    sed -i 's/console=tty1/console=tty3/' /boot/config.txt
+    sed -i 's/$/ quiet splash plymouth.ignore-serial-consoles logo.nologo loglevel=3/' /boot/config.txt
+fi
+
 raspi-config nonint do_boot_splash 0
 raspi-config nonint do_boot_behaviour B4
 
