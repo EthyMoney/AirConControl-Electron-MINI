@@ -103,6 +103,7 @@ echo ""
 
 npm i -g n
 n lts
+export PATH="/usr/local/bin:$PATH"
 hash -r
 npm i -g npm npm-check-updates eslint ts-node typescript pm2
 hash -r
@@ -147,6 +148,21 @@ echo "autologin-user=$USERNAME" >> "$LIGHTDM_AUTLOGIN_FILE"
 echo 'autologin-user-timeout=0' >> "$LIGHTDM_AUTLOGIN_FILE"
 echo 'user-session=openbox' >> "$LIGHTDM_AUTLOGIN_FILE"
 echo 'autologin-session=openbox' >> "$LIGHTDM_AUTLOGIN_FILE"
+
+mkdir -p /usr/share/xsessions
+if [ ! -f /usr/share/xsessions/openbox.desktop ]; then
+  cat > /usr/share/xsessions/openbox.desktop << 'EOF'
+[Desktop Entry]
+Name=Openbox
+Comment=Openbox window manager
+Exec=openbox-session
+TryExec=openbox-session
+Type=XSession
+EOF
+fi
+
+systemctl enable lightdm
+systemctl set-default graphical.target
 
 echo ""
 echo "LightDM autologin configured."
@@ -241,7 +257,7 @@ else
 fi
 
 cd "$APP_DIR"
-npm install
+/usr/local/bin/npm install
 chown -R "$USERNAME:$USERNAME" "$APP_DIR"
 
 echo ""

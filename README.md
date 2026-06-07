@@ -10,14 +10,35 @@ The UI itself is plain HTML, CSS, and JavaScript. The renderer no longer talks t
 
 ## Setup
 
-To set up the Air Conditioning Control App, follow these steps:
+### Desktop / Development
 
 1. Clone the repository: `git clone https://github.com/EthyMoney/AirConControl-Electron-MINI.git`
 2. Install the required dependencies: `npm install`
 3. Configure MQTT with environment variables before launch, if the defaults do not match your setup.
 4. Start the app: `npm start`
-5. For a Raspberry Pi Zero 2 W running Raspberry Pi OS Lite x64 Trixie with a 5 inch 800x480 DSI touchscreen, run `sudo ./installer.sh`. The installer now defaults to the native DSI display path and does not use third-party LCD driver scripts for that setup.
-6. If you still need the older SPI display flow, run the installer with `DISPLAY_TYPE=spi sudo ./installer.sh`.
+
+### Raspberry Pi Kiosk (Pi 3 B+ / Pi Zero 2 W)
+
+The installer handles everything — you do **not** need to clone the repo or run `npm install` yourself. Just copy `installer.sh` to the Pi and run it:
+
+```bash
+sudo ./installer.sh
+```
+
+The installer will:
+
+- Install all system dependencies and the X11 kiosk stack
+- Install Node.js LTS via `n`
+- Clone this repository into `~/AirConControl-Electron-MINI`
+- Run `npm install` inside the cloned app
+- Configure LightDM autologin to Openbox
+- Set up the Openbox autostart to launch the app on boot
+
+The installer defaults to the native DSI display path and does not require third-party LCD driver scripts. If you are using an older SPI display, run:
+
+```bash
+DISPLAY_TYPE=spi sudo ./installer.sh
+```
 
 Supported environment variables are listed in `.env.example`:
 
