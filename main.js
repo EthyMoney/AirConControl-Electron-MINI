@@ -1,18 +1,32 @@
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
+const { windowIcon } = require('./config');
+const { MqttController } = require('./mqtt-controller');
+
+let mainWindow;
+const mqttController = new MqttController();
+
+function sendToRenderer(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(channel, payload);
+}
 
 // Function to create the main window
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: width,
     height: height,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      enableRemoteModule: true
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false
     },
-    icon: path.join(__dirname, 'snow.ico'),
+    icon: windowIcon,
     fullscreen: true, // Optional: Open the window in fullscreen mode
     frame: false // Optional: Remove window frame if desired (needs to be false to hide mouse cursor)
   });
@@ -28,12 +42,38 @@ function createWindow() {
 
   // Handle window close event
   mainWindow.on('closed', function () {
+    mainWindow = null;
     app.quit();
   });
 }
 
+ipcMain.handle('aircon:publish-command', (_event, command) => {
+  return mqttController.publish(command);
+});
+
+ipcMain.handle('aircon:request-status', () => {
+  return mqttController.publish('status');
+});
+
+mqttController.on('status', (payload) => {
+  sendToRenderer('aircon:status', payload);
+});
+
+mqttController.on('tempest', (payload) => {
+  sendToRenderer('aircon:tempest', payload);
+});
+
+mqttController.on('connection', (payload) => {
+  sendToRenderer('aircon:connection', payload);
+});
+
+mqttController.on('tempest-stale', (payload) => {
+  sendToRenderer('aircon:tempest-stale', payload);
+});
+
 // App ready event
 app.whenReady().then(() => {
+  mqttController.start();
   createWindow();
 
   // Additional setup code (if any)
@@ -46,6 +86,7 @@ app.whenReady().then(() => {
 
 // Quit when all windows are closed (except on macOS)
 app.on('window-all-closed', function () {
+  mqttController.stop();
   if (process.platform !== 'darwin') {
     app.quit();
   }

@@ -1,15 +1,40 @@
 {
   "name": "electron-ac-control",
   "version": "1.0.0",
+  "description": "Electron kiosk controller for an MQTT-driven air conditioning display.",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dev": "electron .",
+    "lint": "node --check main.js && node --check renderer.js && node --check preload.js && node --check mqtt-controller.js && node --check config.js",
+    "package": "electron-builder --dir",
+    "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^39.2.4"
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.2"
   },
   "dependencies": {
-    "electron-ac-control": "file:",
-    "mqtt": "^4.3.8"
+    "mqtt": "^5.15.1"
+  },
+  "build": {
+    "appId": "com.ethymoney.airconcontrol",
+    "productName": "AirConControl",
+    "files": [
+      "*.js",
+      "*.html",
+      "*.css",
+      "snow.ico",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "."
+    },
+    "win": {
+      "icon": "snow.ico"
+    },
+    "linux": {
+      "category": "Utility"
+    }
   }
 }

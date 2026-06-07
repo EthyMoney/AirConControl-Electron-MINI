@@ -6,5 +6,11 @@
     "homeassistant",
     "pico",
     "weatherflow"
-  ]
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "/^node -e \"require\\('\\./config'\\); require\\('\\./mqtt-controller'\\); console\\.log\\('syntax-ok'\\)\"$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
+  }
 }

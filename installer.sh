@@ -1,252 +1,257 @@
 #!/bin/bash
+set -euo pipefail
 
-# This will set up a new fresh pi running pi os lite for booting into minimal display manager and running the app
-# This will also install and configure the SPI display and touch screen drivers
+USERNAME="${SUDO_USER:-${USER:-pi}}"
+DISPLAY_TYPE="${DISPLAY_TYPE:-dsi}"
+APP_DIR="/home/$USERNAME/AirConControl-Electron-MINI"
+CONFIG_DIR="/home/$USERNAME/.config"
+OPENBOX_DIR="$CONFIG_DIR/openbox"
+AUTOSTART_FILE="$OPENBOX_DIR/autostart"
+XSESSION_FILE="/home/$USERNAME/.xsession"
+PICOM_CONF="$CONFIG_DIR/picom.conf"
+LIGHTDM_CONF_DIR="/etc/lightdm/lightdm.conf.d"
+LIGHTDM_AUTLOGIN_FILE="$LIGHTDM_CONF_DIR/99-aircon-autologin.conf"
+CALIBRATION_FILE="/etc/X11/xorg.conf.d/99-calibration.conf"
+LCD_SHOW_DIR="/home/$USERNAME/LCD-show"
 
-# With x64 Pi OS Bookworm Lite: Tested working on Pi 4, but on Pi 3 the openbox session does not start and instead we get stuck at a logged in terminal.
-# As a workaround for the Pi 3, you can use the 32-bit Pi OS Bullseye (legacy) Lite, which works fine with this script. Maybe 64-bit Bullseye Lite works too, but I haven't tested it. I tested 32-bit Bullseye Lite on a Pi 3 and it worked fine.
+detect_boot_config_file() {
+  if [ -f /boot/firmware/config.txt ]; then
+    echo /boot/firmware/config.txt
+    return
+  fi
 
-USERNAME="logan"
+  echo /boot/config.txt
+}
 
-# Check for root privileges
+detect_boot_cmdline_file() {
+  if [ -f /boot/firmware/cmdline.txt ]; then
+    echo /boot/firmware/cmdline.txt
+    return
+  fi
+
+  echo /boot/cmdline.txt
+}
+
+ensure_config_line() {
+  local file_path="$1"
+  local line="$2"
+
+  if ! grep -Fqx "$line" "$file_path"; then
+    echo "$line" >> "$file_path"
+  fi
+}
+
+ensure_cmdline_arg() {
+  local file_path="$1"
+  local arg="$2"
+
+  if ! grep -Eq "(^| )${arg}( |$)" "$file_path"; then
+    sed -i "1 s|$| ${arg}|" "$file_path"
+  fi
+}
+
+BOOT_CONFIG_FILE="$(detect_boot_config_file)"
+BOOT_CMDLINE_FILE="$(detect_boot_cmdline_file)"
+
 if [[ $EUID -ne 0 ]]; then
-   echo "This script must be run as root" 
-   exit 1
+  echo "This script must be run as root"
+  exit 1
 fi
 
-echo ""
 echo ""
 echo "======================= Minimal Display Manager With Single Application Kiosk Installer For Raspberry Pi ======================="
 echo ""
-echo ""
-
 echo "====== Running Pre-Installation Checks ======"
 echo ""
 
-# Verify that the internet is reachable
 if ! ping -q -c 1 -W 1 google.com >/dev/null; then
-    echo "The internet is not reachable. Please check your network connection and try again."
-    exit 1
+  echo "The internet is not reachable. Please check your network connection and try again."
+  exit 1
 fi
 
-# Verify that the configured username exists
-if ! id -u $USERNAME &>/dev/null; then
-    echo "The configured username '$USERNAME' does not exist. Either change this user to match yours, or create the user and try again. Try running from `sudo su` as root as well."
-    echo ""
-    exit 1
+if ! id -u "$USERNAME" >/dev/null 2>&1; then
+  echo "The configured username '$USERNAME' does not exist. Create the user or re-run the script with sudo from the target account."
+  exit 1
+fi
+
+if [[ "$DISPLAY_TYPE" != "dsi" && "$DISPLAY_TYPE" != "spi" ]]; then
+  echo "Unsupported DISPLAY_TYPE '$DISPLAY_TYPE'. Use DISPLAY_TYPE=dsi or DISPLAY_TYPE=spi."
+  exit 1
 fi
 
 echo "Pre-installation checks passed. Proceeding with installation..."
 echo ""
-
-echo ""
 echo "====== Performing System Update ======"
 echo ""
 
-apt update && apt upgrade -y
-
-echo ""
-echo "OS updated."
-echo ""
+apt update
+apt upgrade -y
 
 echo ""
 echo "====== Installing APT Packages ======"
 echo ""
 
-apt install vnstat neofetch git lightdm compton net-tools nodm xserver-xorg xserver-xorg-input-all xinit x11-xserver-utils xserver-xorg-core xserver-xorg-video-all openbox npm wavemon -y
+apt install -y \
+  vnstat neofetch git lightdm picom net-tools \
+  xserver-xorg xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all xserver-xorg-input-libinput \
+  xinit x11-xserver-utils openbox npm wavemon \
+  libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libdrm2 libgbm1 libasound2 libxkbcommon0 libxshmfence1
 
 echo ""
 echo "====== Installing Updated Node.js and NPM + Global Packages ======"
 echo ""
 
-npm i n -g
+npm i -g n
 n lts
 hash -r
-npm i -g npm
-npm i -g npm-check-updates eslint ts-node typescript pm2
+npm i -g npm npm-check-updates eslint ts-node typescript pm2
 hash -r
 
 echo ""
-echo "====== Configuring Minimal Display Manager ======"
+echo "====== Configuring X11 Kiosk Session ======"
 echo ""
 
-# Configure nodm file
-sed -i -e "s/NODM_ENABLED=false/NODM_ENABLED=true/" -e "s/NODM_USER=root/NODM_USER=$USERNAME/" \
-  /etc/default/nodm
+mkdir -p "$OPENBOX_DIR"
+echo '#!/bin/bash' > "$AUTOSTART_FILE"
+echo '' >> "$AUTOSTART_FILE"
+echo 'xset s off' >> "$AUTOSTART_FILE"
+echo 'xset -dpms' >> "$AUTOSTART_FILE"
+echo 'xset s noblank' >> "$AUTOSTART_FILE"
+echo 'picom -b &' >> "$AUTOSTART_FILE"
+echo 'export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' >> "$AUTOSTART_FILE"
+echo 'while true; do' >> "$AUTOSTART_FILE"
+echo '  echo "Starting application..."' >> "$AUTOSTART_FILE"
+echo "  cd \"$APP_DIR\"" >> "$AUTOSTART_FILE"
+echo '  npm start' >> "$AUTOSTART_FILE"
+echo '  sleep 5' >> "$AUTOSTART_FILE"
+echo 'done &' >> "$AUTOSTART_FILE"
+chmod +x "$AUTOSTART_FILE"
 
-# Create the autostart file at /home/$USERNAME/.config/openbox/autostart
-mkdir -p /home/$USERNAME/.config/openbox
-cat << 'EOF' > /home/$USERNAME/.config/openbox/autostart
-#!/bin/bash
-
-# Disable screen saver and power management
-xset s off
-xset -dpms
-xset s noblank
-
-# Compton for display performance and vsync
-compton -b &
-
-# Environment variables for Node.js and npm
-export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-
-# Start the application
-while true; do
-  echo "Starting application..."
-  cd /home/logan/AirConControl-Electron-MINI
-  npm start
-  sleep 5
-done &
-EOF
-
-# Ensure the script is executable
-chmod +x /home/$USERNAME/.config/openbox/autostart
-
-# Create xsession file to launch openbox
-echo "#!/bin/bash" > /home/$USERNAME/.xsession
-echo "xset s off" >> /home/$USERNAME/.xsession
-echo "xset -dpms" >> /home/$USERNAME/.xsession
-echo "xset s noblank" >> /home/$USERNAME/.xsession
-echo "exec openbox-session" >> /home/$USERNAME/.xsession
-
-# Make the .xsession file executable
-chmod +x /home/$USERNAME/.xsession
-
-# Change the owner of the .xsession file to the user
-chown $USERNAME:$USERNAME /home/$USERNAME/.xsession
+echo '#!/bin/bash' > "$XSESSION_FILE"
+echo 'xset s off' >> "$XSESSION_FILE"
+echo 'xset -dpms' >> "$XSESSION_FILE"
+echo 'xset s noblank' >> "$XSESSION_FILE"
+echo 'exec openbox-session' >> "$XSESSION_FILE"
+chmod +x "$XSESSION_FILE"
+chown "$USERNAME:$USERNAME" "$XSESSION_FILE"
 
 echo ""
-echo "Openbox autostart and display manager configured."
-echo ""
-
+echo "Openbox autostart and X11 session configured."
 echo ""
 echo "====== Configuring LightDM Autologin ======"
 echo ""
 
-# Configure LightDM autologin
-sed -i "s/#autologin-user=/autologin-user=$USERNAME/" /etc/lightdm/lightdm.conf
-sed -i "s/#autologin-session=/autologin-session=openbox/" /etc/lightdm/lightdm.conf
-sed -i 's/^user-session=.*/user-session=openbox/' /etc/lightdm/lightdm.conf
-sed -i 's/^autologin-session=.*/autologin-session=openbox/' /etc/lightdm/lightdm.conf
+mkdir -p "$LIGHTDM_CONF_DIR"
+echo '[Seat:*]' > "$LIGHTDM_AUTLOGIN_FILE"
+echo "autologin-user=$USERNAME" >> "$LIGHTDM_AUTLOGIN_FILE"
+echo 'autologin-user-timeout=0' >> "$LIGHTDM_AUTLOGIN_FILE"
+echo 'user-session=openbox' >> "$LIGHTDM_AUTLOGIN_FILE"
+echo 'autologin-session=openbox' >> "$LIGHTDM_AUTLOGIN_FILE"
 
 echo ""
 echo "LightDM autologin configured."
 echo ""
-
-echo ""
 echo "====== Processing Pi Configuration Special Triggers ======"
 echo ""
 
-MODEL=$(raspi-config nonint get_pi_type)
-
-if [ "$MODEL" -ge 4 ]; then
-    sed -i 's/console=tty1/console=tty3/' /boot/firmware/cmdline.txt
-    sed -i 's/$/ quiet splash plymouth.ignore-serial-consoles logo.nologo loglevel=3/' /boot/firmware/cmdline.txt
-else
-    sed -i 's/console=tty1/console=tty3/' /boot/config.txt
-    sed -i 's/$/ quiet splash plymouth.ignore-serial-consoles logo.nologo loglevel=3/' /boot/config.txt
-fi
+sed -i 's/console=tty1/console=tty3/' "$BOOT_CMDLINE_FILE"
+ensure_cmdline_arg "$BOOT_CMDLINE_FILE" quiet
+ensure_cmdline_arg "$BOOT_CMDLINE_FILE" splash
+ensure_cmdline_arg "$BOOT_CMDLINE_FILE" plymouth.ignore-serial-consoles
+ensure_cmdline_arg "$BOOT_CMDLINE_FILE" logo.nologo
+ensure_cmdline_arg "$BOOT_CMDLINE_FILE" loglevel=3
 
 raspi-config nonint do_boot_splash 0
 raspi-config nonint do_boot_behaviour B4
 
-# Config adjustments for display performance using compton
-echo -e "vsync = true;\nbackend = \"glx\";\nfading = false;\nshadow-exclude = [ \"name = 'cursor'\" ];" >/home/$USERNAME/.config/compton.conf
+if grep -Fqx 'dtoverlay=vc4-fkms-v3d' "$BOOT_CONFIG_FILE"; then
+  sed -i 's/^dtoverlay=vc4-fkms-v3d$/dtoverlay=vc4-kms-v3d/' "$BOOT_CONFIG_FILE"
+else
+  ensure_config_line "$BOOT_CONFIG_FILE" 'dtoverlay=vc4-kms-v3d'
+fi
+
+echo 'vsync = true;' > "$PICOM_CONF"
+echo 'backend = "glx";' >> "$PICOM_CONF"
+echo 'fading = false;' >> "$PICOM_CONF"
+echo "shadow-exclude = [ \"name = 'cursor'\" ];" >> "$PICOM_CONF"
 
 update-initramfs -u
-
-# Ensure the user owns their config files
-chown -R $USERNAME:$USERNAME /home/$USERNAME/.config
+chown -R "$USERNAME:$USERNAME" "$CONFIG_DIR"
 
 echo ""
 echo "Configuration triggers complete."
 echo ""
-
-echo ""
 echo "====== Installing and Configuring Display and Touch Screen Drivers ======"
 echo ""
 
-# Aight, now let's install and configure the display and touch capabilities, assuming a 3.5" SPI display, adjust as needed for others (LCD-Show has multiple versions of the setup scripts)
-cd /home/$USERNAME
+if [ "$DISPLAY_TYPE" = "dsi" ]; then
+  echo "Configuring for a native DSI touchscreen on Raspberry Pi OS Lite x64 Trixie."
+  echo "No third-party display driver installation is required."
 
-git clone https://github.com/goodtft/LCD-show.git
-chmod -R 755 LCD-show
-cd LCD-show
+  apt install -y libinput-tools
+  rm -f "$CALIBRATION_FILE"
 
-# Remove the "sudo reboot" from the end of the LCD35-show file to prevent the pi from rebooting after this part
-sed -i -e "s/sudo reboot//" LCD35-show
+  if ! grep -Eq '^display_auto_detect=1$' "$BOOT_CONFIG_FILE"; then
+    ensure_config_line "$BOOT_CONFIG_FILE" 'display_auto_detect=1'
+  fi
 
-./LCD35-show
+  if ! grep -Eq '^dtoverlay=vc4-kms-v3d$' "$BOOT_CONFIG_FILE"; then
+    ensure_config_line "$BOOT_CONFIG_FILE" 'dtoverlay=vc4-kms-v3d'
+  fi
 
-cd /home/$USERNAME
+  echo "DSI display path configured. The panel should be detected natively after reboot."
+else
+  echo "Configuring legacy SPI display support."
+  cd "/home/$USERNAME"
+  if [ ! -d "$LCD_SHOW_DIR/.git" ]; then
+    git clone https://github.com/goodtft/LCD-show.git "$LCD_SHOW_DIR"
+  fi
 
-# if needed, rotate:
-# cd LCD-show/
-# sudo ./rotate.sh 90
+  chmod -R 755 "$LCD_SHOW_DIR"
+  cd "$LCD_SHOW_DIR"
+  sed -i -e 's/sudo reboot//' LCD35-show
+  ./LCD35-show
 
-# Install the calibration tool
-cp LCD-show/xinput-calibrator_0.7.5-1_armhf.deb /home/$USERNAME
+  cd "/home/$USERNAME"
+  cp "$LCD_SHOW_DIR/xinput-calibrator_0.7.5-1_armhf.deb" "/home/$USERNAME"
+  apt install -y libc6 libgcc1 libstdc++6 libx11-6 libxext6 libxi6
+  dpkg -i -B xinput-calibrator_0.7.5-1_armhf.deb
 
-# To run the calibration tool:
-# DISPLAY=:0.0 xinput_calibrator
+  echo 'Section "InputClass"' > "$CALIBRATION_FILE"
+  echo '        Identifier "calibration"' >> "$CALIBRATION_FILE"
+  echo '        MatchProduct "ADS7846 Touchscreen"' >> "$CALIBRATION_FILE"
+  echo '        Option "Calibration" "2715 2684 2979 2964"' >> "$CALIBRATION_FILE"
+  echo '        Option "SwapAxes" "0"' >> "$CALIBRATION_FILE"
+  echo 'EndSection' >> "$CALIBRATION_FILE"
 
-# Install the dependencies for the calibration tool
-apt install libc6 libgcc1 libstdc++6 libx11-6 libxext6 libxi6 -y
-
-dpkg -i -B xinput-calibrator_0.7.5-1_armhf.deb
-
-# Create calibration file
-# This preset should work for the 3.5" display out of the box, even pre-calibrated!
-# You may need to run the calibration tool again for yours, the calibration tool will output what to put in this file)
-echo 'Section "InputClass"
-        Identifier "calibration"
-        MatchProduct "ADS7846 Touchscreen"
-        Option "Calibration" "2715 2684 2979 2964"
-        Option "SwapAxes" "0"
-EndSection' | tee /etc/X11/xorg.conf.d/99-calibration.conf > /dev/null
-
-# Now set a higher speed for the SPI connection to the display for improved performance and refresh rate
-# Replace dtoverlay=tft35a:rotate=90 with dtoverlay=tft35a:rotate=90,speed=24000000,fps=60 at /boot/config.txt
-sed -i -e "s/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=90,speed=24000000,fps=60/" /boot/config.txt
-# Note, the above line is what you need to change if you wish to rotate the display orientation or attempt to change the speed or fps on a different display
+  sed -i -e 's/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=90,speed=24000000,fps=60/' "$BOOT_CONFIG_FILE"
+fi
 
 echo ""
 echo "  ---- Display and touch screen drivers installed and configured. ----"
 echo ""
-
-echo ""
 echo "====== Installing Thermostat Application ======"
 echo ""
 
-# Clone the thermostat application
-cd /home/$USERNAME
-git clone https://github.com/EthyMoney/AirConControl-Electron-MINI.git
+cd "/home/$USERNAME"
+if [ -d "$APP_DIR/.git" ]; then
+  git -C "$APP_DIR" pull --ff-only
+else
+  git clone https://github.com/EthyMoney/AirConControl-Electron-MINI.git "$APP_DIR"
+fi
 
-# Install the application dependencies
-cd AirConControl-Electron-MINI
+cd "$APP_DIR"
 npm install
-
-# Set username as the owner of the application files
-chown -R $USERNAME:$USERNAME /home/$USERNAME/AirConControl-Electron-MINI
+chown -R "$USERNAME:$USERNAME" "$APP_DIR"
 
 echo ""
 echo "  ---- Thermostat application installed. ----"
 echo ""
 
-# Now prompt the user to reboot with a default of yes
-echo ""
-echo ""
 read -p "All done! Would you like to reboot now? (You'll need to before this all works anyways) [Y/n] " -n 1 -r
+echo ""
 REPLY=${REPLY:-Y}
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
   reboot
 fi
-# End of script
-
-# For the record, the display setup stuff came from here:
-# https://cdn.sparkfun.com/assets/4/c/2/0/8/User_Guide_For_3.5_inch_LCD.pdf
-
-# And the display manager and auto-start stuff came from here:
-# https://raspberrypi.stackexchange.com/questions/57128/how-to-boot-into-own-python-script-gui-only/57560#57560
-# Be sure to look at the footnote for raspbian lite, that's what I usually use

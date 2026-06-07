@@ -4,11 +4,11 @@
 # To use this, copy this file to /etc/xdg/autostart (or wherever this is on your machine) and make sure it is executable.
 # You can also use Gnome settings to add this file to the startup applications list.
 # HINT: If you edited this file in Windows, you may need to run this on the file to fix the windows line endings:  sed -i -e 's/\r$//' thermostat.desktop
-# BE SURE TO TO CHANGE THE EXEC PATH BELOW TO THE BEGIN.SH SCRIPT LOCATION FOR YOUR SYSTEM
+# BE SURE TO CHANGE THE EXEC PATH BELOW TO THE BEGIN.SH SCRIPT LOCATION FOR YOUR SYSTEM.
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=ShopThermostat
 Terminal=false
-Exec='/home/logan/Desktop/AirConControl-Electron-MINI/begin.sh'
+Exec=bash -lc "$HOME/AirConControl-Electron-MINI/begin.sh"
 Icon=utilities-terminal
