@@ -111,10 +111,104 @@ body {
 }
 
 .status-section {
+  position: relative;
   border-radius: 10px;
   padding: 12px 16px;
   box-shadow: 0 4px 8px black;
   flex-shrink: 0;
+}
+
+.status-runtime {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  font-size: 15px;
+  font-weight: bold;
+  opacity: 0.9;
+}
+
+.status-runtime-info-button {
+  position: absolute;
+  top: 32px;
+  right: 16px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  font-size: 14px;
+  font-weight: bold;
+  background-color: rgba(0, 0, 0, 0.2);
+  color: inherit;
+  cursor: pointer;
+}
+
+.runtime-report-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #222222;
+  color: #ffffff;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 20;
+}
+
+.hidden {
+  display: none;
+}
+
+.runtime-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-report-header h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+#runtimeReportCloseButton {
+  min-width: 100px;
+  height: 42px;
+  border: none;
+  border-radius: 8px;
+  background-color: #cccccc;
+  color: #000000;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.runtime-report-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.runtime-report-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #333333;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 20px;
+}
+
+.runtime-report-empty {
+  font-size: 20px;
+  opacity: 0.85;
+  text-align: center;
+  margin-top: 24px;
 }
 
 .status-cooling {
@@ -194,7 +288,7 @@ body {
 }
 
 .temperature-value {
-  font-size: 42px;
+  font-size: 52px;
   font-weight: bold;
   margin: 0;
   text-align: center;
@@ -332,7 +426,7 @@ body {
 }
 
 .light-mode .status-idle {
-  background-color: #d9df96;
+  background-color: #5f9788;
   color: black;
 }
 
@@ -342,10 +436,27 @@ body {
   box-shadow: 0 4px 8px #333333;
 }
 
+.light-mode .temperature-buttons button.decrease {
+  background-color: #66b8ff;
+}
+
 .light-mode .control-buttons button {
   background-color: #cccccc;
   color: black;
   box-shadow: 0 2px 4px #333333;
+}
+
+.light-mode .status-runtime-info-button {
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+.light-mode .runtime-report-screen {
+  background-color: #ffffff;
+  color: #111111;
+}
+
+.light-mode .runtime-report-row {
+  background-color: #cccccc;
 }
 
 /* Cursor style over buttons */

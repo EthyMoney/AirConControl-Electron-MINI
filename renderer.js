@@ -9,6 +9,11 @@ const currentTempElement = document.getElementById('currentTemp');
 const outsideTemperatureElement = document.getElementById('outside-temperature');
 const outsideHumidityElement = document.getElementById('outside-humidity');
 const statusSection = document.querySelector('.status-section');
+const statusRuntimeLabel = document.getElementById('statusRuntimeLabel');
+const statusRuntimeInfoButton = document.getElementById('statusRuntimeInfoButton');
+const runtimeReportScreen = document.getElementById('runtimeReportScreen');
+const runtimeReportList = document.getElementById('runtimeReportList');
+const runtimeReportCloseButton = document.getElementById('runtimeReportCloseButton');
 const powerOnButton = document.getElementById('powerOnButton');
 const powerOffButton = document.getElementById('powerOffButton');
 const tempDecreaseButton = document.getElementById('tempDecreaseButton');
@@ -94,6 +99,7 @@ function getDisplayedSetTemperature() {
 
 function setConnectionErrorState(label) {
   updateValueWithAnimation(currentStatusLabel, label);
+  statusRuntimeLabel.textContent = '';
   setStatusSectionState('error');
   previousStatusData = {
     Enabled: null,
@@ -103,6 +109,191 @@ function setConnectionErrorState(label) {
   };
   setTempElement.textContent = '--';
   currentTempElement.textContent = '--';
+}
+
+function parseDurationStringToMinutes(value) {
+  const trimmed = String(value).trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const hhmmssMatch = trimmed.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (hhmmssMatch) {
+    const hours = Number.parseInt(hhmmssMatch[1], 10);
+    const minutes = Number.parseInt(hhmmssMatch[2], 10);
+    const seconds = hhmmssMatch[3] ? Number.parseInt(hhmmssMatch[3], 10) : 0;
+    return (hours * 60) + minutes + (seconds / 60);
+  }
+
+  const hrMatch = trimmed.match(/(\d+)\s*(h|hr|hrs|hour|hours)/i);
+  const minMatch = trimmed.match(/(\d+)\s*(m|min|mins|minute|minutes)/i);
+  if (hrMatch || minMatch) {
+    const hours = hrMatch ? Number.parseInt(hrMatch[1], 10) : 0;
+    const minutes = minMatch ? Number.parseInt(minMatch[1], 10) : 0;
+    return (hours * 60) + minutes;
+  }
+
+  const numeric = Number.parseFloat(trimmed);
+  if (Number.isFinite(numeric)) {
+    return numeric;
+  }
+
+  return null;
+}
+
+function parseNumericRuntimeToMinutes(value) {
+  if (!Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  const nowMs = Date.now();
+
+  // Unix timestamp in milliseconds.
+  if (value >= 1e12) {
+    return Math.max(0, (nowMs - value) / 60000);
+  }
+
+  // Unix timestamp in seconds.
+  if (value >= 1e9) {
+    return Math.max(0, ((nowMs / 1000) - value) / 60);
+  }
+
+  // Generic runtime counters are treated as milliseconds.
+  return value / 60000;
+}
+
+function getRuntimeMinutes(statusData) {
+  const minuteFields = ['RuntimeMinutes', 'runtimeMinutes', 'RuntimeMins', 'runtimeMins'];
+  for (const key of minuteFields) {
+    const value = statusData[key];
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  const secondFields = ['RuntimeSeconds', 'runtimeSeconds', 'RuntimeSec', 'runtimeSec'];
+  for (const key of secondFields) {
+    const value = statusData[key];
+    if (Number.isFinite(value)) {
+      return value / 60;
+    }
+  }
+
+  const runtimeFields = ['Runtime', 'runtime', 'runTime'];
+  for (const key of runtimeFields) {
+    const value = statusData[key];
+
+    if (Number.isFinite(value)) {
+      return parseNumericRuntimeToMinutes(value);
+    }
+
+    if (typeof value === 'string') {
+      const numericValue = Number.parseFloat(value);
+      if (Number.isFinite(numericValue)) {
+        return parseNumericRuntimeToMinutes(numericValue);
+      }
+
+      const parsed = parseDurationStringToMinutes(value);
+      if (parsed !== null) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+function formatRuntimeLabel(minutes) {
+  const wholeMinutes = Math.max(0, Math.floor(minutes));
+  const hours = Math.floor(wholeMinutes / 60);
+  const remainingMinutes = wholeMinutes % 60;
+
+  if (hours <= 0) {
+    return `for ${wholeMinutes}m`;
+  }
+
+  if (remainingMinutes === 0) {
+    return `for ${hours}hr`;
+  }
+
+  return `for ${hours}hr ${remainingMinutes}m`;
+}
+
+function formatMillisecondsToDuration(milliseconds) {
+  const totalMinutes = Math.max(0, Math.floor(milliseconds / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+
+  if (hours <= 0) {
+    return `${remainingMinutes}m`;
+  }
+
+  if (remainingMinutes === 0) {
+    return `${hours}hr`;
+  }
+
+  return `${hours}hr ${remainingMinutes}m`;
+}
+
+function renderRuntimeReportRows(report) {
+  runtimeReportList.innerHTML = '';
+
+  const dayKeys = Object.keys(report || {}).sort((a, b) => b.localeCompare(a));
+  if (dayKeys.length === 0) {
+    const emptyElement = document.createElement('div');
+    emptyElement.className = 'runtime-report-empty';
+    emptyElement.textContent = 'No runtime data yet.';
+    runtimeReportList.appendChild(emptyElement);
+    return;
+  }
+
+  for (const dayKey of dayKeys) {
+    const runtimeMs = Number(report[dayKey] || 0);
+
+    const row = document.createElement('div');
+    row.className = 'runtime-report-row';
+
+    const day = document.createElement('span');
+    day.textContent = dayKey;
+
+    const duration = document.createElement('span');
+    duration.textContent = formatMillisecondsToDuration(runtimeMs);
+
+    row.appendChild(day);
+    row.appendChild(duration);
+    runtimeReportList.appendChild(row);
+  }
+}
+
+async function openRuntimeReport() {
+  runtimeReportList.innerHTML = '';
+
+  try {
+    const report = await window.airconApi.getCoolingRuntimeReport();
+    renderRuntimeReportRows(report || {});
+  } catch (_error) {
+    const errorElement = document.createElement('div');
+    errorElement.className = 'runtime-report-empty';
+    errorElement.textContent = 'Failed to load runtime data.';
+    runtimeReportList.appendChild(errorElement);
+  }
+
+  runtimeReportScreen.classList.remove('hidden');
+}
+
+function closeRuntimeReport() {
+  runtimeReportScreen.classList.add('hidden');
+}
+
+function updateStatusRuntime(statusData) {
+  const runtimeMinutes = getRuntimeMinutes(statusData);
+  if (runtimeMinutes === null) {
+    statusRuntimeLabel.textContent = '';
+    return;
+  }
+
+  statusRuntimeLabel.textContent = formatRuntimeLabel(runtimeMinutes);
 }
 
 function updateStatusBarStats(statusData) {
@@ -154,6 +345,8 @@ function updateStatusUI(statusData) {
     updateValueWithAnimation(currentTempElement, statusData.Temp + '°');
   }
 
+  updateStatusRuntime(statusData);
+
   setStatusSectionState(normalizeTask(statusData.Task));
 
   previousStatusData = {
@@ -199,6 +392,14 @@ tempIncreaseButton.addEventListener('click', () => {
   if (!buttonsDisabled) {
     handleTemperatureChange(1);
   }
+});
+
+statusRuntimeInfoButton.addEventListener('click', () => {
+  openRuntimeReport();
+});
+
+runtimeReportCloseButton.addEventListener('click', () => {
+  closeRuntimeReport();
 });
 
 function disableButtonsTemporarily() {

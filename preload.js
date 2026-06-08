@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('airconApi', {
   requestStatus() {
     return ipcRenderer.invoke('aircon:request-status');
   },
+  getCoolingRuntimeReport() {
+    return ipcRenderer.invoke('aircon:get-cooling-runtime-report');
+  },
   onStatus(listener) {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on('aircon:status', wrapped);

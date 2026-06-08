@@ -1,5 +1,7 @@
 const { EventEmitter } = require('events');
+const fs = require('fs');
 const mqtt = require('mqtt');
+const path = require('path');
 const {
   MQTT_BROKER_URL,
   MQTT_TOPIC_AIRCON,
@@ -14,6 +16,173 @@ class MqttController extends EventEmitter {
     this.lastTempestStatsMessageTime = 0;
     this.statusWatchdog = null;
     this.tempestWatchdog = null;
+    this.previousTask = null;
+    this.lastCoolingRuntimeMs = null;
+    this.coolingRuntimeTotalsPath = path.join(__dirname, 'cooling-runtime-daily.json');
+    this.coolingRuntimeTotals = this.loadCoolingRuntimeTotals();
+  }
+
+  normalizeTask(task) {
+    const normalizedTask = String(task || '').trim().toLowerCase();
+
+    if (normalizedTask === 'cool' || normalizedTask === 'cooling') {
+      return 'cooling';
+    }
+
+    if (normalizedTask === 'heat' || normalizedTask === 'heating') {
+      return 'heating';
+    }
+
+    if (normalizedTask === 'off') {
+      return 'off';
+    }
+
+    return 'idle';
+  }
+
+  getDayKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  loadCoolingRuntimeTotals() {
+    try {
+      if (!fs.existsSync(this.coolingRuntimeTotalsPath)) {
+        return {};
+      }
+
+      const content = fs.readFileSync(this.coolingRuntimeTotalsPath, 'utf8');
+      const parsed = JSON.parse(content);
+
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {};
+      }
+
+      return parsed;
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  saveCoolingRuntimeTotals() {
+    const directory = path.dirname(this.coolingRuntimeTotalsPath);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(this.coolingRuntimeTotalsPath, JSON.stringify(this.coolingRuntimeTotals, null, 2));
+  }
+
+  addCoolingRuntimeToToday(runtimeMs) {
+    if (!Number.isFinite(runtimeMs) || runtimeMs <= 0) {
+      return;
+    }
+
+    const dayKey = this.getDayKey();
+    const existing = Number(this.coolingRuntimeTotals[dayKey] || 0);
+    this.coolingRuntimeTotals[dayKey] = existing + Math.floor(runtimeMs);
+    this.saveCoolingRuntimeTotals();
+  }
+
+  parseRuntimeStringToMilliseconds(value) {
+    const trimmed = String(value || '').trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    const hhmmssMatch = trimmed.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
+    if (hhmmssMatch) {
+      const hours = Number.parseInt(hhmmssMatch[1], 10);
+      const minutes = Number.parseInt(hhmmssMatch[2], 10);
+      const seconds = hhmmssMatch[3] ? Number.parseInt(hhmmssMatch[3], 10) : 0;
+      return ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+    }
+
+    return null;
+  }
+
+  parseGenericRuntimeNumberToMilliseconds(value) {
+    if (!Number.isFinite(value) || value < 0) {
+      return null;
+    }
+
+    // Unix timestamp in milliseconds.
+    if (value >= 1e12) {
+      return Math.max(0, Date.now() - value);
+    }
+
+    // Unix timestamp in seconds.
+    if (value >= 1e9) {
+      return Math.max(0, Date.now() - (value * 1000));
+    }
+
+    // Generic runtime values are treated as milliseconds.
+    return value;
+  }
+
+  getRuntimeMilliseconds(payload) {
+    const runtimeMsFields = ['RuntimeMilliseconds', 'runtimeMilliseconds', 'RuntimeMs', 'runtimeMs'];
+    for (const key of runtimeMsFields) {
+      const value = payload[key];
+      if (Number.isFinite(value) && value >= 0) {
+        return value;
+      }
+    }
+
+    const runtimeSecondFields = ['RuntimeSeconds', 'runtimeSeconds', 'RuntimeSec', 'runtimeSec'];
+    for (const key of runtimeSecondFields) {
+      const value = payload[key];
+      if (Number.isFinite(value) && value >= 0) {
+        return value * 1000;
+      }
+    }
+
+    const runtimeMinuteFields = ['RuntimeMinutes', 'runtimeMinutes', 'RuntimeMins', 'runtimeMins'];
+    for (const key of runtimeMinuteFields) {
+      const value = payload[key];
+      if (Number.isFinite(value) && value >= 0) {
+        return value * 60000;
+      }
+    }
+
+    const genericRuntimeFields = ['Runtime', 'runtime', 'runTime'];
+    for (const key of genericRuntimeFields) {
+      const value = payload[key];
+
+      if (Number.isFinite(value)) {
+        return this.parseGenericRuntimeNumberToMilliseconds(value);
+      }
+
+      if (typeof value === 'string') {
+        const numeric = Number.parseFloat(value);
+        if (Number.isFinite(numeric)) {
+          return this.parseGenericRuntimeNumberToMilliseconds(numeric);
+        }
+
+        const parsed = this.parseRuntimeStringToMilliseconds(value);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  updateCoolingRuntimeTotals(payload) {
+    const task = this.normalizeTask(payload.Task);
+    const runtimeMs = this.getRuntimeMilliseconds(payload);
+
+    if (task === 'cooling' && Number.isFinite(runtimeMs)) {
+      this.lastCoolingRuntimeMs = runtimeMs;
+    }
+
+    if (this.previousTask === 'cooling' && task !== 'cooling' && Number.isFinite(this.lastCoolingRuntimeMs)) {
+      this.addCoolingRuntimeToToday(this.lastCoolingRuntimeMs);
+      this.lastCoolingRuntimeMs = null;
+    }
+
+    this.previousTask = task;
   }
 
   start() {
@@ -119,6 +288,7 @@ class MqttController extends EventEmitter {
 
     try {
       const payload = JSON.parse(message);
+      this.updateCoolingRuntimeTotals(payload);
       this.lastStatusMessageTime = Date.now();
       this.emit('status', payload);
     } catch (error) {
@@ -135,6 +305,11 @@ class MqttController extends EventEmitter {
     } catch (error) {
       this.emit('connection', { state: 'error', message: `Failed to parse weather payload: ${error.message}` });
     }
+  }
+
+  getCoolingRuntimeTotals() {
+    this.coolingRuntimeTotals = this.loadCoolingRuntimeTotals();
+    return { ...this.coolingRuntimeTotals };
   }
 }
 

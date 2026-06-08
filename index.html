@@ -19,6 +19,8 @@
 
     <div class="status-section">
       <h2>Status</h2>
+      <div class="status-runtime" id="statusRuntimeLabel"></div>
+      <button class="status-runtime-info-button" id="statusRuntimeInfoButton">i</button>
       <div class="status-value" id="currentStatusLabel">Not Connected!</div>
     </div>
 
@@ -40,6 +42,14 @@
     <div class="control-buttons">
       <button id="powerOnButton">Power On</button>
       <button id="powerOffButton">Power Off</button>
+    </div>
+
+    <div class="runtime-report-screen hidden" id="runtimeReportScreen">
+      <div class="runtime-report-header">
+        <h2>Cooling Runtime Report</h2>
+        <button id="runtimeReportCloseButton">Back</button>
+      </div>
+      <div class="runtime-report-list" id="runtimeReportList"></div>
     </div>
   </div>
 
