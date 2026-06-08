@@ -125,3 +125,5 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+cooling-runtime-daily.json
+cooling-runtime-hourly.json
