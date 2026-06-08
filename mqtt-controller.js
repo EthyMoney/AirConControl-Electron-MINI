@@ -173,12 +173,19 @@ class MqttController extends EventEmitter {
     const task = this.normalizeTask(payload.Task);
     const runtimeMs = this.getRuntimeMilliseconds(payload);
 
-    if (task === 'cooling' && Number.isFinite(runtimeMs)) {
-      this.lastCoolingRuntimeMs = runtimeMs;
-    }
+    if (task === 'cooling') {
+      if (Number.isFinite(runtimeMs)) {
+        if (this.previousTask === 'cooling' && Number.isFinite(this.lastCoolingRuntimeMs)) {
+          const deltaRuntimeMs = runtimeMs - this.lastCoolingRuntimeMs;
 
-    if (this.previousTask === 'cooling' && task !== 'cooling' && Number.isFinite(this.lastCoolingRuntimeMs)) {
-      this.addCoolingRuntimeToToday(this.lastCoolingRuntimeMs);
+          if (deltaRuntimeMs > 0) {
+            this.addCoolingRuntimeToToday(deltaRuntimeMs);
+          }
+        }
+
+        this.lastCoolingRuntimeMs = runtimeMs;
+      }
+    } else {
       this.lastCoolingRuntimeMs = null;
     }
 

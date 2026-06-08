@@ -11,6 +11,8 @@ const outsideHumidityElement = document.getElementById('outside-humidity');
 const statusSection = document.querySelector('.status-section');
 const statusRuntimeLabel = document.getElementById('statusRuntimeLabel');
 const statusRuntimeInfoButton = document.getElementById('statusRuntimeInfoButton');
+const fanStatusLight = document.getElementById('fanStatusLight');
+const compressorStatusLight = document.getElementById('compressorStatusLight');
 const runtimeReportScreen = document.getElementById('runtimeReportScreen');
 const runtimeReportList = document.getElementById('runtimeReportList');
 const runtimeReportCloseButton = document.getElementById('runtimeReportCloseButton');
@@ -100,6 +102,8 @@ function getDisplayedSetTemperature() {
 function setConnectionErrorState(label) {
   updateValueWithAnimation(currentStatusLabel, label);
   statusRuntimeLabel.textContent = '';
+  setLightState(fanStatusLight, null);
+  setLightState(compressorStatusLight, null);
   setStatusSectionState('error');
   previousStatusData = {
     Enabled: null,
@@ -109,6 +113,99 @@ function setConnectionErrorState(label) {
   };
   setTempElement.textContent = '--';
   currentTempElement.textContent = '--';
+}
+
+function setLightState(element, state) {
+  element.classList.remove('on', 'off', 'unknown');
+
+  if (state === true) {
+    element.classList.add('on');
+    return;
+  }
+
+  if (state === false) {
+    element.classList.add('off');
+    return;
+  }
+
+  element.classList.add('unknown');
+}
+
+function normalizeBooleanState(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (value === 1) {
+      return true;
+    }
+
+    if (value === 0) {
+      return false;
+    }
+
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+
+    if (['on', 'true', '1', 'running', 'active', 'enabled'].includes(normalized)) {
+      return true;
+    }
+
+    if (['off', 'false', '0', 'idle', 'inactive', 'disabled'].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function getFirstKnownState(statusData, candidateKeys) {
+  for (const key of candidateKeys) {
+    if (!(key in statusData)) {
+      continue;
+    }
+
+    const state = normalizeBooleanState(statusData[key]);
+    if (state !== null) {
+      return state;
+    }
+  }
+
+  return null;
+}
+
+function getStateByKeyword(statusData, keyword) {
+  const loweredKeyword = keyword.toLowerCase();
+
+  for (const [key, value] of Object.entries(statusData)) {
+    if (!String(key).toLowerCase().includes(loweredKeyword)) {
+      continue;
+    }
+
+    const state = normalizeBooleanState(value);
+    if (state !== null) {
+      return state;
+    }
+  }
+
+  return null;
+}
+
+function updateHardwareLights(statusData) {
+  const fanState =
+    getFirstKnownState(statusData, ['Fan', 'fan', 'FanOn', 'fanOn', 'FanON', 'Blower', 'blower'])
+    ?? getStateByKeyword(statusData, 'fan')
+    ?? getStateByKeyword(statusData, 'blower');
+  const compressorState =
+    getFirstKnownState(statusData, ['Compressor', 'compressor', 'CompressorOn', 'compressorOn', 'CompON', 'compON', 'CompOn', 'compOn'])
+    ?? getStateByKeyword(statusData, 'compressor');
+
+  setLightState(fanStatusLight, fanState);
+  setLightState(compressorStatusLight, compressorState);
 }
 
 function parseDurationStringToMinutes(value) {
@@ -346,6 +443,7 @@ function updateStatusUI(statusData) {
   }
 
   updateStatusRuntime(statusData);
+  updateHardwareLights(statusData);
 
   setStatusSectionState(normalizeTask(statusData.Task));
 
