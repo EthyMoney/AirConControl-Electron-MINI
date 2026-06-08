@@ -16,6 +16,10 @@ const compressorStatusLight = document.getElementById('compressorStatusLight');
 const runtimeReportScreen = document.getElementById('runtimeReportScreen');
 const runtimeReportList = document.getElementById('runtimeReportList');
 const runtimeReportCloseButton = document.getElementById('runtimeReportCloseButton');
+const runtimeReportDayDetail = document.getElementById('runtimeReportDayDetail');
+const runtimeReportDayTitle = document.getElementById('runtimeReportDayTitle');
+const runtimeReportDayBackButton = document.getElementById('runtimeReportDayBackButton');
+const runtimeHourlyChart = document.getElementById('runtimeHourlyChart');
 const powerOnButton = document.getElementById('powerOnButton');
 const powerOffButton = document.getElementById('powerOffButton');
 const tempDecreaseButton = document.getElementById('tempDecreaseButton');
@@ -31,6 +35,7 @@ let previousStatusData = {
 let pendingSetTemp = null;
 let temperatureCommitTimeout = null;
 let buttonsDisabled = false;
+let runtimeHourlyReportCache = {};
 
 function normalizeTask(task) {
   const normalizedTask = String(task || '').trim().toLowerCase();
@@ -348,27 +353,129 @@ function renderRuntimeReportRows(report) {
   for (const dayKey of dayKeys) {
     const runtimeMs = Number(report[dayKey] || 0);
 
+    const rowButton = document.createElement('button');
+    rowButton.className = 'runtime-report-row-button';
+
     const row = document.createElement('div');
     row.className = 'runtime-report-row';
 
     const day = document.createElement('span');
-    day.textContent = dayKey;
+    day.textContent = formatReportDate(dayKey);
 
     const duration = document.createElement('span');
     duration.textContent = formatMillisecondsToDuration(runtimeMs);
 
     row.appendChild(day);
     row.appendChild(duration);
-    runtimeReportList.appendChild(row);
+    rowButton.appendChild(row);
+    rowButton.addEventListener('click', () => {
+      openRuntimeReportDay(dayKey);
+    });
+    runtimeReportList.appendChild(rowButton);
   }
+}
+
+function formatHourLabel(hourIndex) {
+  if (hourIndex === 0) {
+    return '12a';
+  }
+
+  if (hourIndex < 12) {
+    return `${hourIndex}a`;
+  }
+
+  if (hourIndex === 12) {
+    return '12p';
+  }
+
+  return `${hourIndex - 12}p`;
+}
+
+function renderRuntimeHourlyChart(dayKey) {
+  runtimeHourlyChart.innerHTML = '';
+
+  const dayHourlyData = runtimeHourlyReportCache[dayKey] || {};
+  const hourlyValues = Array.from({ length: 24 }, (_unused, hourIndex) => {
+    const value = Number(dayHourlyData[String(hourIndex)] ?? dayHourlyData[hourIndex] ?? 0);
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
+  });
+
+  const maxValue = Math.max(...hourlyValues);
+  if (maxValue <= 0) {
+    const emptyElement = document.createElement('div');
+    emptyElement.className = 'runtime-report-empty';
+    emptyElement.textContent = 'No hourly runtime data for this day.';
+    runtimeHourlyChart.appendChild(emptyElement);
+    return;
+  }
+
+  for (let hourIndex = 0; hourIndex < 24; hourIndex += 1) {
+    const value = hourlyValues[hourIndex];
+    const widthPercent = value > 0 ? (value / maxValue) * 100 : 0;
+
+    const row = document.createElement('div');
+    row.className = 'runtime-hour-row';
+
+    const label = document.createElement('span');
+    label.textContent = formatHourLabel(hourIndex);
+
+    const track = document.createElement('div');
+    track.className = 'runtime-hour-track';
+
+    const fill = document.createElement('div');
+    fill.className = 'runtime-hour-fill';
+    fill.style.width = `${widthPercent}%`;
+    if (value <= 0) {
+      fill.style.minWidth = '0';
+    }
+
+    const valueLabel = document.createElement('span');
+    valueLabel.className = 'runtime-hour-value';
+    valueLabel.textContent = formatMillisecondsToDuration(value);
+
+    track.appendChild(fill);
+    row.appendChild(label);
+    row.appendChild(track);
+    row.appendChild(valueLabel);
+    runtimeHourlyChart.appendChild(row);
+  }
+}
+
+function formatReportDate(dayKey) {
+  const parts = String(dayKey).split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (year.length === 4 && month.length === 2 && day.length === 2) {
+      return `${month}/${day}/${year}`;
+    }
+  }
+
+  return String(dayKey);
+}
+
+function openRuntimeReportDay(dayKey) {
+  runtimeReportDayTitle.textContent = `${formatReportDate(dayKey)} Hourly`;
+  renderRuntimeHourlyChart(dayKey);
+  runtimeReportList.classList.add('hidden');
+  runtimeReportDayDetail.classList.remove('hidden');
+}
+
+function closeRuntimeReportDay() {
+  runtimeReportDayDetail.classList.add('hidden');
+  runtimeReportList.classList.remove('hidden');
 }
 
 async function openRuntimeReport() {
   runtimeReportList.innerHTML = '';
+  closeRuntimeReportDay();
 
   try {
-    const report = await window.airconApi.getCoolingRuntimeReport();
-    renderRuntimeReportRows(report || {});
+    const [dailyReport, hourlyReport] = await Promise.all([
+      window.airconApi.getCoolingRuntimeReport(),
+      window.airconApi.getCoolingRuntimeHourlyReport()
+    ]);
+    runtimeHourlyReportCache = hourlyReport || {};
+    renderRuntimeReportRows(dailyReport || {});
   } catch (_error) {
     const errorElement = document.createElement('div');
     errorElement.className = 'runtime-report-empty';
@@ -380,6 +487,7 @@ async function openRuntimeReport() {
 }
 
 function closeRuntimeReport() {
+  closeRuntimeReportDay();
   runtimeReportScreen.classList.add('hidden');
 }
 
@@ -498,6 +606,10 @@ statusRuntimeInfoButton.addEventListener('click', () => {
 
 runtimeReportCloseButton.addEventListener('click', () => {
   closeRuntimeReport();
+});
+
+runtimeReportDayBackButton.addEventListener('click', () => {
+  closeRuntimeReportDay();
 });
 
 function disableButtonsTemporarily() {

@@ -18,8 +18,11 @@ class MqttController extends EventEmitter {
     this.tempestWatchdog = null;
     this.previousTask = null;
     this.lastCoolingRuntimeMs = null;
+    this.lastCoolingUpdateAt = null;
     this.coolingRuntimeTotalsPath = path.join(__dirname, 'cooling-runtime-daily.json');
+    this.coolingRuntimeHourlyPath = path.join(__dirname, 'cooling-runtime-hourly.json');
     this.coolingRuntimeTotals = this.loadCoolingRuntimeTotals();
+    this.coolingRuntimeHourly = this.loadCoolingRuntimeHourly();
   }
 
   normalizeTask(task) {
@@ -70,6 +73,81 @@ class MqttController extends EventEmitter {
     const directory = path.dirname(this.coolingRuntimeTotalsPath);
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(this.coolingRuntimeTotalsPath, JSON.stringify(this.coolingRuntimeTotals, null, 2));
+  }
+
+  loadCoolingRuntimeHourly() {
+    try {
+      if (!fs.existsSync(this.coolingRuntimeHourlyPath)) {
+        return {};
+      }
+
+      const content = fs.readFileSync(this.coolingRuntimeHourlyPath, 'utf8');
+      const parsed = JSON.parse(content);
+
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {};
+      }
+
+      return parsed;
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  saveCoolingRuntimeHourly() {
+    const directory = path.dirname(this.coolingRuntimeHourlyPath);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(this.coolingRuntimeHourlyPath, JSON.stringify(this.coolingRuntimeHourly, null, 2));
+  }
+
+  addCoolingRuntimeDelta(runtimeMs, fromTimestampMs, toTimestampMs) {
+    if (!Number.isFinite(runtimeMs) || runtimeMs <= 0) {
+      return;
+    }
+
+    if (!Number.isFinite(fromTimestampMs) || !Number.isFinite(toTimestampMs) || toTimestampMs <= fromTimestampMs) {
+      return;
+    }
+
+    const intervalMs = toTimestampMs - fromTimestampMs;
+    let cursor = fromTimestampMs;
+    let allocatedMs = 0;
+
+    while (cursor < toTimestampMs) {
+      const currentDate = new Date(cursor);
+      const currentHour = currentDate.getHours();
+      const dayKey = this.getDayKey(currentDate);
+
+      const nextHourBoundary = new Date(cursor);
+      nextHourBoundary.setMinutes(0, 0, 0);
+      nextHourBoundary.setHours(nextHourBoundary.getHours() + 1);
+      const sliceEnd = Math.min(toTimestampMs, nextHourBoundary.getTime());
+      const sliceIntervalMs = sliceEnd - cursor;
+
+      let sliceRuntimeMs = Math.floor((runtimeMs * sliceIntervalMs) / intervalMs);
+      if (sliceEnd >= toTimestampMs) {
+        sliceRuntimeMs = runtimeMs - allocatedMs;
+      }
+
+      if (sliceRuntimeMs > 0) {
+        const dailyExisting = Number(this.coolingRuntimeTotals[dayKey] || 0);
+        this.coolingRuntimeTotals[dayKey] = dailyExisting + sliceRuntimeMs;
+
+        if (!this.coolingRuntimeHourly[dayKey] || typeof this.coolingRuntimeHourly[dayKey] !== 'object') {
+          this.coolingRuntimeHourly[dayKey] = {};
+        }
+
+        const hourKey = String(currentHour);
+        const hourlyExisting = Number(this.coolingRuntimeHourly[dayKey][hourKey] || 0);
+        this.coolingRuntimeHourly[dayKey][hourKey] = hourlyExisting + sliceRuntimeMs;
+      }
+
+      allocatedMs += sliceRuntimeMs;
+      cursor = sliceEnd;
+    }
+
+    this.saveCoolingRuntimeTotals();
+    this.saveCoolingRuntimeHourly();
   }
 
   addCoolingRuntimeToToday(runtimeMs) {
@@ -172,21 +250,28 @@ class MqttController extends EventEmitter {
   updateCoolingRuntimeTotals(payload) {
     const task = this.normalizeTask(payload.Task);
     const runtimeMs = this.getRuntimeMilliseconds(payload);
+    const now = Date.now();
 
     if (task === 'cooling') {
       if (Number.isFinite(runtimeMs)) {
-        if (this.previousTask === 'cooling' && Number.isFinite(this.lastCoolingRuntimeMs)) {
+        if (
+          this.previousTask === 'cooling'
+          && Number.isFinite(this.lastCoolingRuntimeMs)
+          && Number.isFinite(this.lastCoolingUpdateAt)
+        ) {
           const deltaRuntimeMs = runtimeMs - this.lastCoolingRuntimeMs;
 
           if (deltaRuntimeMs > 0) {
-            this.addCoolingRuntimeToToday(deltaRuntimeMs);
+            this.addCoolingRuntimeDelta(deltaRuntimeMs, this.lastCoolingUpdateAt, now);
           }
         }
 
         this.lastCoolingRuntimeMs = runtimeMs;
+        this.lastCoolingUpdateAt = now;
       }
     } else {
       this.lastCoolingRuntimeMs = null;
+      this.lastCoolingUpdateAt = null;
     }
 
     this.previousTask = task;
@@ -317,6 +402,11 @@ class MqttController extends EventEmitter {
   getCoolingRuntimeTotals() {
     this.coolingRuntimeTotals = this.loadCoolingRuntimeTotals();
     return { ...this.coolingRuntimeTotals };
+  }
+
+  getCoolingRuntimeHourlyReport() {
+    this.coolingRuntimeHourly = this.loadCoolingRuntimeHourly();
+    return { ...this.coolingRuntimeHourly };
   }
 }
 

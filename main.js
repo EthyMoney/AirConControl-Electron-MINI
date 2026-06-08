@@ -59,6 +59,10 @@ ipcMain.handle('aircon:get-cooling-runtime-report', () => {
   return mqttController.getCoolingRuntimeTotals();
 });
 
+ipcMain.handle('aircon:get-cooling-runtime-hourly-report', () => {
+  return mqttController.getCoolingRuntimeHourlyReport();
+});
+
 mqttController.on('status', (payload) => {
   sendToRenderer('aircon:status', payload);
 });

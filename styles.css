@@ -241,6 +241,81 @@ body {
   font-size: 20px;
 }
 
+.runtime-report-row-button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+}
+
+.runtime-report-day-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.runtime-report-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.runtime-report-day-header h3 {
+  margin: 0;
+  font-size: 24px;
+}
+
+#runtimeReportDayBackButton {
+  min-width: 90px;
+  height: 38px;
+  border: none;
+  border-radius: 8px;
+  background-color: #cccccc;
+  color: #000000;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.runtime-hourly-chart {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.runtime-hour-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 60px;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+
+.runtime-hour-track {
+  height: 14px;
+  background-color: rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.runtime-hour-fill {
+  height: 100%;
+  background-color: #66b8ff;
+  border-radius: 7px;
+  min-width: 2px;
+}
+
+.runtime-hour-value {
+  text-align: right;
+}
+
 .runtime-report-empty {
   font-size: 20px;
   opacity: 0.85;
@@ -494,6 +569,10 @@ body {
 
 .light-mode .runtime-report-row {
   background-color: #cccccc;
+}
+
+.light-mode .runtime-hour-track {
+  background-color: rgba(0, 0, 0, 0.15);
 }
 
 /* Cursor style over buttons */
