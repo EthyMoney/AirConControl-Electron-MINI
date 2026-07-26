@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Air Conditioner Controller</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -21,6 +22,7 @@
       <h2>Status</h2>
       <div class="status-runtime" id="statusRuntimeLabel"></div>
       <button class="status-runtime-info-button" id="statusRuntimeInfoButton">i</button>
+      <div class="status-health" id="statusHealthLabel">Starting…</div>
       <div class="status-hardware-lights">
         <div class="status-hardware-item">
           <span class="status-light" id="fanStatusLight"></span>
@@ -32,6 +34,7 @@
         </div>
       </div>
       <div class="status-value" id="currentStatusLabel">Not Connected!</div>
+      <div class="status-command" id="commandStatusLabel"></div>
     </div>
 
     <div class="main-section">
@@ -59,6 +62,7 @@
         <h2>Cooling Runtime Report</h2>
         <button id="runtimeReportCloseButton">Back</button>
       </div>
+      <div class="runtime-report-meta" id="runtimeReportMeta"></div>
       <div class="runtime-report-list" id="runtimeReportList"></div>
       <div class="runtime-report-day-detail hidden" id="runtimeReportDayDetail">
         <div class="runtime-report-day-header">

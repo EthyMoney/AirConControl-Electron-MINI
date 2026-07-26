@@ -4,9 +4,10 @@
   "description": "Electron kiosk controller for an MQTT-driven air conditioning display.",
   "main": "main.js",
   "scripts": {
-    "start": "electron . --no-sandbox",
-    "dev": "electron . --no-sandbox",
-    "lint": "node --check main.js && node --check renderer.js && node --check preload.js && node --check mqtt-controller.js && node --check config.js",
+    "start": "electron .",
+    "dev": "electron .",
+    "lint": "node --check main.js && node --check renderer.js && node --check preload.js && node --check mqtt-controller.js && node --check home-assistant-bridge.js && node --check runtime-store.js && node --check config.js",
+    "test": "node --test",
     "package": "electron-builder --dir",
     "dist": "electron-builder"
   },

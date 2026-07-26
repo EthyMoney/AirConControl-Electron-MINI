@@ -114,9 +114,42 @@ body {
 .status-section {
   position: relative;
   border-radius: 10px;
-  padding: 12px 16px;
+  padding: 12px 16px 10px;
   box-shadow: 0 4px 8px black;
   flex-shrink: 0;
+}
+
+.status-health {
+  position: absolute;
+  top: 17px;
+  left: 82px;
+  right: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: bold;
+  opacity: 0.8;
+}
+
+.status-command {
+  min-height: 16px;
+  margin-top: 2px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.command-pending {
+  color: #6b4600;
+}
+
+.command-confirmed {
+  color: #087a31;
+}
+
+.command-error {
+  color: #8b0000;
 }
 
 .status-runtime {
@@ -209,6 +242,15 @@ body {
 .runtime-report-header h2 {
   margin: 0;
   font-size: 28px;
+}
+
+.runtime-report-meta {
+  min-height: 17px;
+  font-size: 13px;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #runtimeReportCloseButton {
@@ -331,6 +373,16 @@ body {
 .status-error {
   background-color: #ff5555;
   color: black;
+}
+
+.status-unknown {
+  background-color: #5c6268;
+  color: white;
+}
+
+.status-stale {
+  outline: 4px solid #d4a72c;
+  outline-offset: -4px;
 }
 
 .status-heating {
@@ -489,6 +541,14 @@ body {
   transition: background-color 0.3s ease;
 }
 
+.control-buttons button:disabled {
+  opacity: 0.45;
+}
+
+.control-buttons button.selected {
+  box-shadow: inset 0 0 0 3px #66b8ff, 0 2px 4px black;
+}
+
 /* hover styling, not wanted for touch interfaces (would stay in hover state after tap) */
 /*
 .light-mode .control-buttons button:hover {
@@ -524,6 +584,11 @@ body {
 
 .light-mode .status-error {
   background-color: #ff5555;
+  color: black;
+}
+
+.light-mode .status-unknown {
+  background-color: #aeb4ba;
   color: black;
 }
 

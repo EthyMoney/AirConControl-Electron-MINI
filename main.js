@@ -1,108 +1,111 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { windowIcon } = require('./config');
 const { MqttController } = require('./mqtt-controller');
 
-let mainWindow;
-const mqttController = new MqttController();
+let mainWindow = null;
+let mqttController = null;
+let shutdownStarted = false;
+let shutdownComplete = false;
 
 function sendToRenderer(channel, payload) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading()) {
     return;
   }
-
   mainWindow.webContents.send(channel, payload);
 }
 
-// Function to create the main window
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const indexPath = path.join(__dirname, 'index.html');
+  const allowedUrl = pathToFileURL(indexPath).toString();
   mainWindow = new BrowserWindow({
-    width: width,
-    height: height,
+    width,
+    height,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false
+      sandbox: true
     },
     icon: windowIcon,
-    fullscreen: true, // Optional: Open the window in fullscreen mode
-    frame: false // Optional: Remove window frame if desired (needs to be false to hide mouse cursor)
+    fullscreen: true,
+    frame: false
   });
 
-  // Hide the menu bar
   mainWindow.setMenu(null);
-
-  // Load the index.html file
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
-
-  // Open the DevTools (optional)
-  //mainWindow.webContents.openDevTools();
-
-  // Handle window close event
-  mainWindow.on('closed', function () {
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== allowedUrl) {
+      event.preventDefault();
+    }
+  });
+  mainWindow.loadFile(indexPath);
+  mainWindow.on('closed', () => {
     mainWindow = null;
-    app.quit();
   });
 }
 
-ipcMain.handle('aircon:publish-command', (_event, command) => {
-  return mqttController.publish(command);
-});
-
-ipcMain.handle('aircon:request-status', () => {
-  return mqttController.publish('status');
-});
-
-ipcMain.handle('aircon:get-cooling-runtime-report', () => {
-  return mqttController.getCoolingRuntimeTotals();
-});
-
-ipcMain.handle('aircon:get-cooling-runtime-hourly-report', () => {
-  return mqttController.getCoolingRuntimeHourlyReport();
-});
-
-mqttController.on('status', (payload) => {
-  sendToRenderer('aircon:status', payload);
-});
-
-mqttController.on('tempest', (payload) => {
-  sendToRenderer('aircon:tempest', payload);
-});
-
-mqttController.on('connection', (payload) => {
-  sendToRenderer('aircon:connection', payload);
-});
-
-mqttController.on('tempest-stale', (payload) => {
-  sendToRenderer('aircon:tempest-stale', payload);
-});
-
-// App ready event
-app.whenReady().then(() => {
-  mqttController.start();
-  createWindow();
-
-  // Additional setup code (if any)
-
-  // macOS specific setup
-  if (process.platform === 'darwin') {
-    app.dock.hide(); // Hide the app icon in the dock
+function requireController() {
+  if (!mqttController) {
+    throw new Error('The controller is still starting');
   }
+  return mqttController;
+}
+
+ipcMain.handle('aircon:get-state', () => requireController().getSnapshot());
+ipcMain.handle('aircon:send-command', (_event, command) => requireController().sendCommand(command));
+ipcMain.handle('aircon:request-status', () => requireController().requestStatus());
+ipcMain.handle('aircon:get-runtime-report', () => requireController().getRuntimeReport());
+
+app.whenReady().then(async () => {
+  const runtimeDataPath = path.join(app.getPath('userData'), 'cooling-runtime-report.json');
+  mqttController = new MqttController({
+    runtimeDataPath,
+    legacyDailyPath: path.join(__dirname, 'cooling-runtime-daily.json'),
+    legacyHourlyPath: path.join(__dirname, 'cooling-runtime-hourly.json')
+  });
+  await mqttController.initialize();
+  mqttController.on('state', (snapshot) => sendToRenderer('aircon:state', snapshot));
+
+  createWindow();
+  mqttController.start();
+
+  if (process.platform === 'darwin') {
+    app.dock.hide();
+  }
+}).catch((error) => {
+  console.error('Failed to start AirConControl:', error);
+  app.quit();
 });
 
-// Quit when all windows are closed (except on macOS)
-app.on('window-all-closed', function () {
-  mqttController.stop();
+app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-// Activate the app (only on macOS)
-app.on('activate', function () {
+app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+
+app.on('before-quit', (event) => {
+  if (shutdownComplete || !mqttController) {
+    return;
+  }
+
+  event.preventDefault();
+  if (shutdownStarted) {
+    return;
+  }
+  shutdownStarted = true;
+  mqttController.stop()
+    .catch((error) => console.error('Failed to flush runtime state:', error))
+    .finally(() => {
+      shutdownComplete = true;
+      app.quit();
+    });
 });
