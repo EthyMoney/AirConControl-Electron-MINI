@@ -10,6 +10,10 @@ const STATUS_CLASS_NAMES = [
 const MIN_SET_TEMPERATURE = 50;
 const MAX_SET_TEMPERATURE = 90;
 const TEMPERATURE_COMMIT_DELAY_MS = 750;
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const TEMPERATURE_CHART_WIDTH = 720;
+const TEMPERATURE_CHART_HEIGHT = 280;
+const TEMPERATURE_LINE_GAP_MS = 15 * 60 * 1000;
 
 const currentStatusLabel = document.getElementById('currentStatusLabel');
 const statusHealthLabel = document.getElementById('statusHealthLabel');
@@ -31,6 +35,9 @@ const runtimeReportDayDetail = document.getElementById('runtimeReportDayDetail')
 const runtimeReportDayTitle = document.getElementById('runtimeReportDayTitle');
 const runtimeReportDayBackButton = document.getElementById('runtimeReportDayBackButton');
 const runtimeHourlyChart = document.getElementById('runtimeHourlyChart');
+const temperatureHistoryChart = document.getElementById('temperatureHistoryChart');
+const temperatureHistoryViewButton = document.getElementById('temperatureHistoryViewButton');
+const runtimeHistoryViewButton = document.getElementById('runtimeHistoryViewButton');
 const powerOnButton = document.getElementById('powerOnButton');
 const powerOffButton = document.getElementById('powerOffButton');
 const tempDecreaseButton = document.getElementById('tempDecreaseButton');
@@ -40,6 +47,7 @@ let latestState = null;
 let draftSetTemp = null;
 let temperatureCommitTimeout = null;
 let runtimeReportCache = null;
+let selectedRuntimeReportDay = null;
 let localCommandError = null;
 
 function triggerValueChangeAnimation(element) {
@@ -345,11 +353,14 @@ function formatHourRange(hourIndex) {
 
 function renderRuntimeReportRows(report) {
   runtimeReportList.innerHTML = '';
-  const dayKeys = Object.keys(report.daily || {}).sort((a, b) => b.localeCompare(a));
+  const dayKeys = [...new Set([
+    ...Object.keys(report.daily || {}),
+    ...Object.keys(report.temperatureHistory || {})
+  ])].sort((a, b) => b.localeCompare(a));
   if (dayKeys.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'runtime-report-empty';
-    empty.textContent = 'No observed cooling runtime yet.';
+    empty.textContent = 'No climate history yet.';
     runtimeReportList.appendChild(empty);
     return;
   }
@@ -362,12 +373,176 @@ function renderRuntimeReportRows(report) {
     const day = document.createElement('span');
     day.textContent = formatReportDate(dayKey);
     const duration = document.createElement('span');
-    duration.textContent = formatMillisecondsToDuration(report.daily[dayKey]);
+    const temperatures = (report.temperatureHistory?.[dayKey] || [])
+      .map((sample) => Number(sample.value))
+      .filter(Number.isFinite);
+    const temperatureRange = temperatures.length > 0
+      ? `${Math.min(...temperatures).toFixed(1)}–${Math.max(...temperatures).toFixed(1)}°F`
+      : 'no temp data';
+    duration.textContent = `Cooling ${formatMillisecondsToDuration(report.daily[dayKey] || 0)} · ${temperatureRange}`;
     row.append(day, duration);
     button.appendChild(row);
     button.addEventListener('click', () => openRuntimeReportDay(dayKey));
     runtimeReportList.appendChild(button);
   }
+}
+
+function createSvgElement(name, attributes = {}, text = null) {
+  const element = document.createElementNS(SVG_NAMESPACE, name);
+  for (const [key, value] of Object.entries(attributes)) {
+    element.setAttribute(key, String(value));
+  }
+  if (text !== null) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+function getReportDayBounds(dayKey) {
+  const [year, month, day] = String(dayKey).split('-').map(Number);
+  const start = new Date(year, month - 1, day);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.getTime(), end: end.getTime() };
+}
+
+function formatHistoryTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function renderTemperatureHistoryChart(dayKey) {
+  temperatureHistoryChart.innerHTML = '';
+  const samples = (runtimeReportCache?.temperatureHistory?.[dayKey] || [])
+    .filter((sample) => Number.isFinite(sample.at) && Number.isFinite(sample.value))
+    .sort((a, b) => a.at - b.at);
+  if (samples.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'runtime-report-empty';
+    empty.textContent = 'No temperature history for this day.';
+    temperatureHistoryChart.appendChild(empty);
+    return;
+  }
+
+  const { start: dayStart, end: dayEnd } = getReportDayBounds(dayKey);
+  const intervals = (runtimeReportCache?.coolingIntervals?.[dayKey] || [])
+    .filter((interval) => Number.isFinite(interval.from) && Number.isFinite(interval.to) && interval.to > interval.from);
+  const values = samples.map((sample) => sample.value);
+  const observedMinimum = Math.min(...values);
+  const observedMaximum = Math.max(...values);
+  const rangePadding = Math.max(1, (observedMaximum - observedMinimum) * 0.15);
+  let chartMinimum = Math.floor(observedMinimum - rangePadding);
+  let chartMaximum = Math.ceil(observedMaximum + rangePadding);
+  if (chartMaximum - chartMinimum < 4) {
+    const center = (chartMaximum + chartMinimum) / 2;
+    chartMinimum = Math.floor(center - 2);
+    chartMaximum = Math.ceil(center + 2);
+  }
+
+  const summary = document.createElement('div');
+  summary.className = 'temperature-history-summary';
+  summary.textContent = `${observedMinimum.toFixed(1)}–${observedMaximum.toFixed(1)}°F · blue zones = AC running · tap line for details`;
+
+  const svg = createSvgElement('svg', {
+    class: 'temperature-history-svg',
+    viewBox: `0 0 ${TEMPERATURE_CHART_WIDTH} ${TEMPERATURE_CHART_HEIGHT}`,
+    role: 'img',
+    'aria-label': `Current temperature history for ${formatReportDate(dayKey)}`
+  });
+  const margin = { top: 12, right: 12, bottom: 28, left: 46 };
+  const plotWidth = TEMPERATURE_CHART_WIDTH - margin.left - margin.right;
+  const plotHeight = TEMPERATURE_CHART_HEIGHT - margin.top - margin.bottom;
+  const xForTimestamp = (timestamp) => margin.left
+    + ((timestamp - dayStart) / (dayEnd - dayStart)) * plotWidth;
+  const yForTemperature = (temperature) => margin.top
+    + ((chartMaximum - temperature) / (chartMaximum - chartMinimum)) * plotHeight;
+
+  for (const interval of intervals) {
+    const clippedStart = Math.max(dayStart, interval.from);
+    const clippedEnd = Math.min(dayEnd, interval.to);
+    if (clippedEnd <= clippedStart) continue;
+    svg.appendChild(createSvgElement('rect', {
+      class: 'temperature-history-cooling-zone',
+      x: xForTimestamp(clippedStart),
+      y: margin.top,
+      width: Math.max(1, xForTimestamp(clippedEnd) - xForTimestamp(clippedStart)),
+      height: plotHeight
+    }));
+  }
+
+  for (let tick = 0; tick <= 2; tick += 1) {
+    const value = chartMaximum - ((chartMaximum - chartMinimum) * tick) / 2;
+    const y = yForTemperature(value);
+    svg.appendChild(createSvgElement('line', {
+      class: 'temperature-history-grid-line',
+      x1: margin.left,
+      y1: y,
+      x2: TEMPERATURE_CHART_WIDTH - margin.right,
+      y2: y
+    }));
+    svg.appendChild(createSvgElement('text', {
+      class: 'temperature-history-axis-label',
+      x: margin.left - 7,
+      y: y + 4,
+      'text-anchor': 'end'
+    }, `${value.toFixed(0)}°`));
+  }
+
+  for (let hour = 0; hour < 24; hour += 3) {
+    const tickDate = new Date(dayStart);
+    tickDate.setHours(hour, 0, 0, 0);
+    const x = xForTimestamp(tickDate.getTime());
+    svg.appendChild(createSvgElement('line', {
+      class: 'temperature-history-grid-line',
+      x1: x,
+      y1: margin.top,
+      x2: x,
+      y2: margin.top + plotHeight
+    }));
+    svg.appendChild(createSvgElement('text', {
+      class: 'temperature-history-axis-label',
+      x,
+      y: TEMPERATURE_CHART_HEIGHT - 7,
+      'text-anchor': hour === 0 ? 'start' : 'middle'
+    }, formatHourLabel(hour)));
+  }
+
+  let segment = [];
+  const appendSegment = () => {
+    if (segment.length === 0) return;
+    const pathData = segment.map((sample, index) => `${index === 0 ? 'M' : 'L'} ${xForTimestamp(sample.at)} ${yForTemperature(sample.value)}`).join(' ');
+    svg.appendChild(createSvgElement('path', { class: 'temperature-history-line', d: pathData }));
+    segment = [];
+  };
+  for (const sample of samples) {
+    if (segment.length > 0 && sample.at - segment.at(-1).at > TEMPERATURE_LINE_GAP_MS) {
+      appendSegment();
+    }
+    segment.push(sample);
+  }
+  appendSegment();
+
+  const selection = createSvgElement('circle', {
+    class: 'temperature-history-selection hidden',
+    r: 5
+  });
+  svg.appendChild(selection);
+  svg.addEventListener('click', (event) => {
+    const bounds = svg.getBoundingClientRect();
+    const svgX = ((event.clientX - bounds.left) / bounds.width) * TEMPERATURE_CHART_WIDTH;
+    const selectedTimestamp = dayStart
+      + ((Math.max(margin.left, Math.min(TEMPERATURE_CHART_WIDTH - margin.right, svgX)) - margin.left) / plotWidth)
+      * (dayEnd - dayStart);
+    const sample = samples.reduce((nearest, candidate) => (
+      Math.abs(candidate.at - selectedTimestamp) < Math.abs(nearest.at - selectedTimestamp) ? candidate : nearest
+    ));
+    const cooling = intervals.some((interval) => sample.at >= interval.from && sample.at < interval.to);
+    selection.setAttribute('cx', xForTimestamp(sample.at));
+    selection.setAttribute('cy', yForTemperature(sample.value));
+    selection.classList.remove('hidden');
+    summary.textContent = `${formatHistoryTime(sample.at)} · ${sample.value.toFixed(1)}°F · AC ${cooling ? 'running' : 'off'}`;
+  });
+
+  temperatureHistoryChart.append(summary, svg);
 }
 
 function renderRuntimeHourlyChart(dayKey) {
@@ -430,16 +605,35 @@ function renderRuntimeHourlyChart(dayKey) {
   runtimeHourlyChart.append(summary, plot);
 }
 
+function setRuntimeReportDayView(view) {
+  if (!selectedRuntimeReportDay) {
+    return;
+  }
+  const showTemperature = view === 'temperature';
+  temperatureHistoryChart.classList.toggle('hidden', !showTemperature);
+  runtimeHourlyChart.classList.toggle('hidden', showTemperature);
+  temperatureHistoryViewButton.classList.toggle('selected', showTemperature);
+  runtimeHistoryViewButton.classList.toggle('selected', !showTemperature);
+  if (showTemperature) {
+    renderTemperatureHistoryChart(selectedRuntimeReportDay);
+  } else {
+    renderRuntimeHourlyChart(selectedRuntimeReportDay);
+  }
+}
+
 function openRuntimeReportDay(dayKey) {
-  runtimeReportDayTitle.textContent = `${formatReportDate(dayKey)} Hourly`;
-  renderRuntimeHourlyChart(dayKey);
+  selectedRuntimeReportDay = dayKey;
+  runtimeReportDayTitle.textContent = formatReportDate(dayKey);
   runtimeReportList.classList.add('hidden');
   runtimeReportDayDetail.classList.remove('hidden');
+  const hasTemperatureHistory = (runtimeReportCache?.temperatureHistory?.[dayKey]?.length || 0) > 0;
+  setRuntimeReportDayView(hasTemperatureHistory ? 'temperature' : 'runtime');
 }
 
 function closeRuntimeReportDay() {
   runtimeReportDayDetail.classList.add('hidden');
   runtimeReportList.classList.remove('hidden');
+  selectedRuntimeReportDay = null;
 }
 
 async function openRuntimeReport() {
@@ -489,6 +683,8 @@ tempIncreaseButton.addEventListener('click', () => handleTemperatureChange(1));
 statusRuntimeInfoButton.addEventListener('click', openRuntimeReport);
 runtimeReportCloseButton.addEventListener('click', closeRuntimeReport);
 runtimeReportDayBackButton.addEventListener('click', closeRuntimeReportDay);
+temperatureHistoryViewButton.addEventListener('click', () => setRuntimeReportDayView('temperature'));
+runtimeHistoryViewButton.addEventListener('click', () => setRuntimeReportDayView('runtime'));
 
 window.airconApi.onState(acceptState);
 window.airconApi.getState().then(acceptState).catch((error) => {

@@ -293,6 +293,11 @@ body {
   font-size: 20px;
 }
 
+.runtime-report-row span:last-child {
+  font-size: 16px;
+  text-align: right;
+}
+
 .runtime-report-row-button {
   width: 100%;
   border: none;
@@ -322,8 +327,13 @@ body {
   font-size: 24px;
 }
 
-#runtimeReportDayBackButton {
-  min-width: 90px;
+.runtime-report-day-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.runtime-report-day-actions button {
+  min-width: 84px;
   height: 38px;
   border: none;
   border-radius: 8px;
@@ -346,6 +356,69 @@ body {
   text-align: center;
   font-size: 16px;
   font-weight: bold;
+}
+
+.runtime-report-day-actions button.selected {
+  background-color: #66b8ff;
+  box-shadow: inset 0 0 0 2px #ffffff;
+}
+
+.temperature-history-chart {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.temperature-history-summary {
+  min-height: 20px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.temperature-history-svg {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  color: inherit;
+  cursor: none;
+}
+
+.temperature-history-cooling-zone {
+  fill: #66b8ff;
+  opacity: 0.28;
+}
+
+.temperature-history-grid-line {
+  stroke: currentColor;
+  stroke-width: 1;
+  opacity: 0.18;
+  vector-effect: non-scaling-stroke;
+}
+
+.temperature-history-axis-label {
+  fill: currentColor;
+  font-size: 11px;
+  font-weight: bold;
+  opacity: 0.8;
+}
+
+.temperature-history-line {
+  fill: none;
+  stroke: #ff9f43;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.temperature-history-selection {
+  fill: #ff9f43;
+  stroke: #ffffff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
 
 .runtime-hourly-plot {
@@ -704,6 +777,14 @@ body {
 
 .light-mode .runtime-report-row {
   background-color: #cccccc;
+}
+
+.light-mode .runtime-report-day-actions button.selected {
+  box-shadow: inset 0 0 0 2px #1f6fae;
+}
+
+.light-mode .temperature-history-selection {
+  stroke: #111111;
 }
 
 .light-mode .runtime-hour-bars {

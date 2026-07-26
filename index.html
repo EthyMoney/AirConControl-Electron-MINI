@@ -61,7 +61,7 @@
 
     <div class="runtime-report-screen hidden" id="runtimeReportScreen">
       <div class="runtime-report-header">
-        <h2>Cooling Runtime Report</h2>
+        <h2>Climate History</h2>
         <button id="runtimeReportCloseButton">Back</button>
       </div>
       <div class="runtime-report-meta" id="runtimeReportMeta"></div>
@@ -69,9 +69,14 @@
       <div class="runtime-report-day-detail hidden" id="runtimeReportDayDetail">
         <div class="runtime-report-day-header">
           <h3 id="runtimeReportDayTitle"></h3>
-          <button id="runtimeReportDayBackButton">Days</button>
+          <div class="runtime-report-day-actions">
+            <button class="selected" id="temperatureHistoryViewButton">Temp</button>
+            <button id="runtimeHistoryViewButton">Runtime</button>
+            <button id="runtimeReportDayBackButton">Days</button>
+          </div>
         </div>
-        <div class="runtime-hourly-chart" id="runtimeHourlyChart"></div>
+        <div class="temperature-history-chart" id="temperatureHistoryChart"></div>
+        <div class="runtime-hourly-chart hidden" id="runtimeHourlyChart"></div>
       </div>
     </div>
   </div>
