@@ -87,6 +87,77 @@ test('splits runtime correctly at local midnight', async (t) => {
 
   assert.equal(report.daily[firstDay], 30000);
   assert.equal(report.daily[secondDay], 30000);
+  assert.deepEqual(report.coolingIntervals[firstDay], [{ from: now - 60000, to: now - 30000 }]);
+  assert.deepEqual(report.coolingIntervals[secondDay], [{ from: now - 30000, to: now }]);
+  await store.flush();
+});
+
+test('samples daily temperatures and preserves exact cooling zones', async (t) => {
+  let now = new Date(2026, 4, 10, 12, 0, 0).getTime();
+  const { store } = await createStore(t, {
+    now: () => now,
+    maxObservationGapMs: 20 * 60 * 1000,
+    temperatureSampleIntervalMs: 5 * 60 * 1000
+  });
+  const dayKey = getDayKey(new Date(now));
+  const coolingStartedAt = now;
+
+  store.recordObservation({ cooling: true, temperature: 78, receivedAt: now });
+  now += 60000;
+  store.recordObservation({ cooling: true, temperature: 77.5, receivedAt: now });
+  now += 4 * 60000;
+  store.recordObservation({ cooling: true, temperature: 76, receivedAt: now });
+  now += 5 * 60000;
+  store.recordObservation({ cooling: false, temperature: 74, receivedAt: now });
+
+  const report = store.getReport();
+  assert.deepEqual(report.temperatureHistory[dayKey], [
+    { at: coolingStartedAt + 60000, value: 77.5 },
+    { at: coolingStartedAt + 5 * 60000, value: 76 },
+    { at: coolingStartedAt + 10 * 60000, value: 74 }
+  ]);
+  assert.deepEqual(report.coolingIntervals[dayKey], [{
+    from: coolingStartedAt,
+    to: coolingStartedAt + 10 * 60000
+  }]);
+  await store.flush();
+});
+
+test('migrates version 2 stores with empty detailed history', () => {
+  const { sanitizeStoredData } = require('../runtime-store');
+  const migrated = sanitizeStoredData({
+    version: 2,
+    daily: { '2026-01-01': 60000 },
+    hourly: { '2026-01-01': { 12: 60000 } },
+    tracker: { cooling: false, receivedAt: 1234 },
+    gaps: []
+  });
+
+  assert.equal(migrated.version, 3);
+  assert.deepEqual(migrated.temperatureHistory, {});
+  assert.deepEqual(migrated.coolingIntervals, {});
+});
+
+test('bounds detailed history retention without deleting aggregate runtime', async (t) => {
+  let now = new Date(2026, 5, 1, 12, 0, 0).getTime();
+  const { store } = await createStore(t, {
+    now: () => now,
+    detailedHistoryRetentionDays: 2
+  });
+  const oldDayKey = getDayKey(new Date(now));
+
+  store.recordObservation({ cooling: true, temperature: 76, receivedAt: now });
+  now += 60000;
+  store.recordObservation({ cooling: false, temperature: 75, receivedAt: now });
+  now = new Date(2026, 5, 3, 12, 0, 0).getTime();
+  const currentDayKey = getDayKey(new Date(now));
+  store.recordObservation({ cooling: false, temperature: 74, receivedAt: now });
+
+  const report = store.getReport();
+  assert.equal(report.daily[oldDayKey], 60000);
+  assert.equal(report.temperatureHistory[oldDayKey], undefined);
+  assert.equal(report.coolingIntervals[oldDayKey], undefined);
+  assert.equal(report.temperatureHistory[currentDayKey].length, 1);
   await store.flush();
 });
 

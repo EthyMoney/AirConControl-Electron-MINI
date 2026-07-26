@@ -2,8 +2,11 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const MAX_RECORDED_GAPS = 100;
+const TEMPERATURE_SAMPLE_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_TEMPERATURE_SAMPLES_PER_DAY = 400;
+const DETAILED_HISTORY_RETENTION_DAYS = 90;
 
 function createEmptyData() {
   return {
@@ -14,7 +17,9 @@ function createEmptyData() {
       cooling: null,
       receivedAt: null
     },
-    gaps: []
+    gaps: [],
+    temperatureHistory: {},
+    coolingIntervals: {}
   };
 }
 
@@ -52,6 +57,69 @@ function sanitizeHourlyMap(value) {
   return sanitized;
 }
 
+function sanitizeTemperatureHistory(value) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const sanitized = {};
+  for (const [dayKey, rawSamples] of Object.entries(value)) {
+    if (!Array.isArray(rawSamples)) {
+      continue;
+    }
+
+    const samples = rawSamples
+      .filter((sample) => isRecord(sample))
+      .map((sample) => ({ at: Number(sample.at), value: Number(sample.value) }))
+      .filter((sample) => Number.isFinite(sample.at)
+        && Number.isFinite(sample.value)
+        && sample.value >= -100
+        && sample.value <= 200)
+      .sort((a, b) => a.at - b.at)
+      .slice(-MAX_TEMPERATURE_SAMPLES_PER_DAY);
+    if (samples.length > 0) {
+      sanitized[dayKey] = samples;
+    }
+  }
+  return sanitized;
+}
+
+function mergeIntervals(intervals) {
+  const merged = [];
+  for (const interval of intervals.sort((a, b) => a.from - b.from)) {
+    const previous = merged.at(-1);
+    if (previous && interval.from <= previous.to) {
+      previous.to = Math.max(previous.to, interval.to);
+    } else {
+      merged.push({ ...interval });
+    }
+  }
+  return merged;
+}
+
+function sanitizeCoolingIntervals(value) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const sanitized = {};
+  for (const [dayKey, rawIntervals] of Object.entries(value)) {
+    if (!Array.isArray(rawIntervals)) {
+      continue;
+    }
+    const intervals = rawIntervals
+      .filter((interval) => isRecord(interval)
+        && Number.isFinite(interval.from)
+        && Number.isFinite(interval.to)
+        && interval.to > interval.from)
+      .map((interval) => ({ from: interval.from, to: interval.to }));
+    if (intervals.length > 0) {
+      sanitized[dayKey] = mergeIntervals(intervals);
+    }
+  }
+  return sanitized;
+}
+
 function sanitizeStoredData(value) {
   if (!isRecord(value)) {
     throw new Error('Runtime store must contain a JSON object');
@@ -60,6 +128,8 @@ function sanitizeStoredData(value) {
   const data = createEmptyData();
   data.daily = sanitizeNumberMap(value.daily);
   data.hourly = sanitizeHourlyMap(value.hourly);
+  data.temperatureHistory = sanitizeTemperatureHistory(value.temperatureHistory);
+  data.coolingIntervals = sanitizeCoolingIntervals(value.coolingIntervals);
 
   if (isRecord(value.tracker)) {
     data.tracker.cooling = typeof value.tracker.cooling === 'boolean' ? value.tracker.cooling : null;
@@ -120,12 +190,57 @@ function addRuntimeInterval(target, fromTimestampMs, toTimestampMs) {
   }
 }
 
+function addCoolingInterval(target, fromTimestampMs, toTimestampMs) {
+  if (!Number.isFinite(fromTimestampMs) || !Number.isFinite(toTimestampMs) || toTimestampMs <= fromTimestampMs) {
+    return;
+  }
+
+  let cursor = fromTimestampMs;
+  while (cursor < toTimestampMs) {
+    const currentDate = new Date(cursor);
+    const dayKey = getDayKey(currentDate);
+    const nextDay = new Date(cursor);
+    nextDay.setHours(24, 0, 0, 0);
+    const sliceEnd = Math.min(toTimestampMs, nextDay.getTime());
+    if (sliceEnd <= cursor) {
+      break;
+    }
+
+    const intervals = target.coolingIntervals[dayKey] || [];
+    target.coolingIntervals[dayKey] = mergeIntervals([
+      ...intervals,
+      { from: cursor, to: sliceEnd }
+    ]);
+    cursor = sliceEnd;
+  }
+}
+
+function addTemperatureSample(target, temperature, receivedAt, sampleIntervalMs = TEMPERATURE_SAMPLE_INTERVAL_MS) {
+  if (!Number.isFinite(temperature) || !Number.isFinite(receivedAt)) {
+    return;
+  }
+
+  const dayKey = getDayKey(new Date(receivedAt));
+  const samples = target.temperatureHistory[dayKey] || [];
+  const bucket = Math.floor(receivedAt / sampleIntervalMs);
+  const existingIndex = samples.findIndex((sample) => Math.floor(sample.at / sampleIntervalMs) === bucket);
+  if (existingIndex >= 0) {
+    samples[existingIndex] = { at: receivedAt, value: temperature };
+  } else {
+    samples.push({ at: receivedAt, value: temperature });
+  }
+  samples.sort((a, b) => a.at - b.at);
+  target.temperatureHistory[dayKey] = samples.slice(-MAX_TEMPERATURE_SAMPLES_PER_DAY);
+}
+
 class RuntimeStore extends EventEmitter {
   constructor({
     filePath,
     legacyDailyPath = null,
     legacyHourlyPath = null,
     maxObservationGapMs = 300000,
+    temperatureSampleIntervalMs = TEMPERATURE_SAMPLE_INTERVAL_MS,
+    detailedHistoryRetentionDays = DETAILED_HISTORY_RETENTION_DAYS,
     now = () => Date.now(),
     saveDelayMs = 250
   }) {
@@ -135,6 +250,8 @@ class RuntimeStore extends EventEmitter {
     this.legacyDailyPath = legacyDailyPath;
     this.legacyHourlyPath = legacyHourlyPath;
     this.maxObservationGapMs = maxObservationGapMs;
+    this.temperatureSampleIntervalMs = temperatureSampleIntervalMs;
+    this.detailedHistoryRetentionDays = detailedHistoryRetentionDays;
     this.now = now;
     this.saveDelayMs = saveDelayMs;
     this.data = createEmptyData();
@@ -179,6 +296,7 @@ class RuntimeStore extends EventEmitter {
       }
     }
 
+    this.pruneDetailedHistory();
     this.initialized = true;
     if (this.loadWarning) {
       this.emit('warning', this.loadWarning);
@@ -237,9 +355,26 @@ class RuntimeStore extends EventEmitter {
     this.data.gaps = this.data.gaps.slice(-MAX_RECORDED_GAPS);
   }
 
-  recordObservation({ cooling, receivedAt = this.now() }) {
+  pruneDetailedHistory() {
+    const cutoff = new Date(this.now());
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - Math.max(0, this.detailedHistoryRetentionDays - 1));
+    const cutoffDayKey = getDayKey(cutoff);
+    for (const collection of [this.data.temperatureHistory, this.data.coolingIntervals]) {
+      for (const dayKey of Object.keys(collection)) {
+        if (dayKey < cutoffDayKey) {
+          delete collection[dayKey];
+        }
+      }
+    }
+  }
+
+  recordObservation({ cooling, temperature = null, receivedAt = this.now() }) {
     if (typeof cooling !== 'boolean' || !Number.isFinite(receivedAt)) {
       throw new Error('A runtime observation requires a boolean cooling state and timestamp');
+    }
+    if (temperature !== null && !Number.isFinite(temperature)) {
+      throw new Error('A temperature observation must be numeric or null');
     }
 
     const previous = this.data.tracker;
@@ -252,6 +387,7 @@ class RuntimeStore extends EventEmitter {
         const trustedEnd = Math.min(receivedAt, previous.receivedAt + this.maxObservationGapMs);
         if (previous.cooling === true) {
           addRuntimeInterval(this.data, previous.receivedAt, trustedEnd);
+          addCoolingInterval(this.data, previous.receivedAt, trustedEnd);
         }
 
         if (elapsedMs > this.maxObservationGapMs) {
@@ -260,7 +396,9 @@ class RuntimeStore extends EventEmitter {
       }
     }
 
+    addTemperatureSample(this.data, temperature, receivedAt, this.temperatureSampleIntervalMs);
     this.data.tracker = { cooling, receivedAt };
+    this.pruneDetailedHistory();
     this.scheduleSave();
   }
 
@@ -272,6 +410,7 @@ class RuntimeStore extends EventEmitter {
       const liveEnd = Math.min(now, reportData.tracker.receivedAt + this.maxObservationGapMs);
       if (reportData.tracker.cooling === true) {
         addRuntimeInterval(reportData, reportData.tracker.receivedAt, liveEnd);
+        addCoolingInterval(reportData, reportData.tracker.receivedAt, liveEnd);
       }
       if (now > liveEnd) {
         reportData.gaps.push({ from: liveEnd, to: now, reason: 'status-not-observed' });
@@ -285,6 +424,9 @@ class RuntimeStore extends EventEmitter {
       source: 'validated status intervals',
       daily: reportData.daily,
       hourly: reportData.hourly,
+      temperatureHistory: reportData.temperatureHistory,
+      coolingIntervals: reportData.coolingIntervals,
+      detailedHistoryRetentionDays: this.detailedHistoryRetentionDays,
       gaps: reportData.gaps,
       warning: this.loadWarning
     };
@@ -357,7 +499,9 @@ class RuntimeStore extends EventEmitter {
 
 module.exports = {
   RuntimeStore,
+  addCoolingInterval,
   addRuntimeInterval,
+  addTemperatureSample,
   createEmptyData,
   getDayKey,
   sanitizeStoredData

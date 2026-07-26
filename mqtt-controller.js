@@ -5,6 +5,7 @@ const { RuntimeStore } = require('./runtime-store');
 const {
   AIRCON_STALE_AFTER_MS,
   COMMAND_TIMEOUT_MS,
+  DETAILED_HISTORY_RETENTION_DAYS,
   HOME_ASSISTANT_BASE_TOPIC,
   HOME_ASSISTANT_DEVICE_ID,
   HOME_ASSISTANT_DEVICE_NAME,
@@ -19,6 +20,7 @@ const {
   MQTT_TOPIC_AIRCON_STATE,
   MQTT_TOPIC_TEMPEST_STATS,
   MQTT_USERNAME,
+  TEMPERATURE_HISTORY_SAMPLE_MS,
   WEATHER_STALE_AFTER_MS
 } = require('./config');
 
@@ -325,6 +327,8 @@ class MqttController extends EventEmitter {
       legacyDailyPath: options.legacyDailyPath,
       legacyHourlyPath: options.legacyHourlyPath,
       maxObservationGapMs: this.airconStaleAfterMs,
+      temperatureSampleIntervalMs: options.temperatureHistorySampleMs || TEMPERATURE_HISTORY_SAMPLE_MS,
+      detailedHistoryRetentionDays: options.detailedHistoryRetentionDays || DETAILED_HISTORY_RETENTION_DAYS,
       now: this.now
     });
     this.homeAssistantBridge = options.homeAssistantBridge || new HomeAssistantBridge({
@@ -496,7 +500,11 @@ class MqttController extends EventEmitter {
       const cooling = reported.compressorOn === null
         ? reported.task === 'cooling'
         : reported.compressorOn;
-      this.runtimeStore.recordObservation({ cooling, receivedAt });
+      this.runtimeStore.recordObservation({
+        cooling,
+        temperature: reported.temp,
+        receivedAt
+      });
       this.state.aircon = {
         reported,
         receivedAt,

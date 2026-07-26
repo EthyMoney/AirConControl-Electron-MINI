@@ -134,7 +134,11 @@ test('controller separates weather errors and confirms commands from reported st
   now += 500;
   controller.handleAirconMessage(JSON.stringify({ Task: 'idle', Enabled: true, Temp: 73, SetTemp: 74 }));
   assert.equal(controller.getSnapshot().command.status, 'confirmed');
-  assert.deepEqual(runtimeStore.observations.at(-1), { cooling: false, receivedAt: now });
+  assert.deepEqual(runtimeStore.observations.at(-1), {
+    cooling: false,
+    temperature: 73,
+    receivedAt: now
+  });
   await controller.stop();
 });
 

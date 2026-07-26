@@ -16,6 +16,8 @@ function getPositiveIntegerEnvironmentValue(name, fallback) {
 const AIRCON_STALE_AFTER_MS = getPositiveIntegerEnvironmentValue('AIRCON_STALE_AFTER_MS', 300000);
 const WEATHER_STALE_AFTER_MS = getPositiveIntegerEnvironmentValue('WEATHER_STALE_AFTER_MS', 900000);
 const COMMAND_TIMEOUT_MS = getPositiveIntegerEnvironmentValue('COMMAND_TIMEOUT_MS', 10000);
+const TEMPERATURE_HISTORY_SAMPLE_MS = getPositiveIntegerEnvironmentValue('TEMPERATURE_HISTORY_SAMPLE_MS', 300000);
+const DETAILED_HISTORY_RETENTION_DAYS = getPositiveIntegerEnvironmentValue('DETAILED_HISTORY_RETENTION_DAYS', 90);
 
 function getBooleanEnvironmentValue(name, fallback) {
   const value = process.env[name];
@@ -37,6 +39,7 @@ const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID || `${HOME_ASSISTANT_DEVICE_ID
 module.exports = {
   AIRCON_STALE_AFTER_MS,
   COMMAND_TIMEOUT_MS,
+  DETAILED_HISTORY_RETENTION_DAYS,
   HOME_ASSISTANT_BASE_TOPIC,
   HOME_ASSISTANT_DEVICE_ID,
   HOME_ASSISTANT_DEVICE_NAME,
@@ -52,6 +55,7 @@ module.exports = {
   MQTT_TOPIC_AIRCON_STATE,
   MQTT_TOPIC_TEMPEST_STATS,
   MQTT_USERNAME,
+  TEMPERATURE_HISTORY_SAMPLE_MS,
   WEATHER_STALE_AFTER_MS,
   windowIcon: path.join(__dirname, 'snow.ico')
 };
