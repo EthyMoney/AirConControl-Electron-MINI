@@ -120,16 +120,26 @@ body {
 }
 
 .status-health {
-  position: absolute;
-  top: 17px;
-  left: 82px;
-  right: 150px;
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
   font-weight: bold;
   opacity: 0.8;
+}
+
+.status-heading-row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding-right: 140px;
+}
+
+.status-heading-row h2 {
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .status-command {
