@@ -664,7 +664,11 @@ function closeRuntimeReport() {
 
 function updateClock() {
   const date = new Date();
-  document.getElementById('current-time').textContent = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  document.getElementById('current-time').textContent = date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
 }
 
 function isNighttime() {
