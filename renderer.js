@@ -339,6 +339,10 @@ function formatHourLabel(hourIndex) {
   return `${hourIndex - 12}p`;
 }
 
+function formatHourRange(hourIndex) {
+  return `${formatHourLabel(hourIndex)}–${formatHourLabel((hourIndex + 1) % 24)}`;
+}
+
 function renderRuntimeReportRows(report) {
   runtimeReportList.innerHTML = '';
   const dayKeys = Object.keys(report.daily || {}).sort((a, b) => b.localeCompare(a));
@@ -378,24 +382,52 @@ function renderRuntimeHourlyChart(dayKey) {
     return;
   }
 
-  values.forEach((value, hour) => {
-    const row = document.createElement('div');
-    row.className = 'runtime-hour-row';
+  const summary = document.createElement('div');
+  summary.className = 'runtime-hourly-summary';
+  const total = values.reduce((sum, value) => sum + value, 0);
+  summary.textContent = `${formatMillisecondsToDuration(total)} total · tap a bar for details`;
+
+  const plot = document.createElement('div');
+  plot.className = 'runtime-hourly-plot';
+
+  const yAxis = document.createElement('div');
+  yAxis.className = 'runtime-hour-y-axis';
+  for (const labelText of ['60m', '30m', '0']) {
     const label = document.createElement('span');
-    label.textContent = formatHourLabel(hour);
-    const track = document.createElement('div');
-    track.className = 'runtime-hour-track';
-    const fill = document.createElement('div');
+    label.textContent = labelText;
+    yAxis.appendChild(label);
+  }
+
+  const bars = document.createElement('div');
+  bars.className = 'runtime-hour-bars';
+  values.forEach((value, hour) => {
+    const column = document.createElement('button');
+    column.className = 'runtime-hour-column';
+    column.type = 'button';
+    column.setAttribute('aria-label', `${formatHourRange(hour)}: ${formatMillisecondsToDuration(value)} cooling`);
+
+    const meter = document.createElement('span');
+    meter.className = 'runtime-hour-meter';
+    const fill = document.createElement('span');
     fill.className = 'runtime-hour-fill';
-    fill.style.width = `${Math.min(100, (value / 3600000) * 100)}%`;
-    if (value <= 0) fill.style.minWidth = '0';
-    const valueLabel = document.createElement('span');
-    valueLabel.className = 'runtime-hour-value';
-    valueLabel.textContent = formatMillisecondsToDuration(value);
-    track.appendChild(fill);
-    row.append(label, track, valueLabel);
-    runtimeHourlyChart.appendChild(row);
+    fill.style.height = `${Math.min(100, (value / 3600000) * 100)}%`;
+    meter.appendChild(fill);
+
+    const label = document.createElement('span');
+    label.className = 'runtime-hour-label';
+    label.textContent = hour % 3 === 0 ? formatHourLabel(hour) : '';
+
+    column.append(meter, label);
+    column.addEventListener('click', () => {
+      bars.querySelector('.selected')?.classList.remove('selected');
+      column.classList.add('selected');
+      summary.textContent = `${formatHourRange(hour)} · ${formatMillisecondsToDuration(value)} cooling`;
+    });
+    bars.appendChild(column);
   });
+
+  plot.append(yAxis, bars);
+  runtimeHourlyChart.append(summary, plot);
 }
 
 function openRuntimeReportDay(dayKey) {

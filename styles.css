@@ -239,7 +239,7 @@ body {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .runtime-report-header {
@@ -335,37 +335,97 @@ body {
 
 .runtime-hourly-chart {
   flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-right: 4px;
-}
-
-.runtime-hour-row {
-  display: grid;
-  grid-template-columns: 50px 1fr 60px;
-  align-items: center;
   gap: 8px;
-  font-size: 16px;
+  min-height: 0;
 }
 
-.runtime-hour-track {
-  height: 14px;
-  background-color: rgba(255, 255, 255, 0.12);
-  border-radius: 7px;
-  overflow: hidden;
+.runtime-hourly-summary {
+  min-height: 20px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.runtime-hourly-plot {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 6px;
+}
+
+.runtime-hour-y-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-bottom: 20px;
+  text-align: right;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.runtime-hour-bars {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 3px;
+  height: 100%;
+  min-height: 0;
+  background-image: linear-gradient(to bottom,
+    rgba(255, 255, 255, 0.15) 1px,
+    transparent 1px,
+    transparent 50%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0.15) calc(50% + 1px),
+    transparent calc(50% + 1px));
+  background-size: 100% calc(100% - 20px);
+  background-repeat: no-repeat;
+}
+
+.runtime-hour-column {
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 20px;
+  cursor: none;
+}
+
+.runtime-hour-meter {
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .runtime-hour-fill {
-  height: 100%;
+  display: block;
+  width: min(18px, 78%);
+  min-height: 0;
   background-color: #66b8ff;
-  border-radius: 7px;
-  min-width: 2px;
+  border-radius: 4px 4px 0 0;
 }
 
-.runtime-hour-value {
-  text-align: right;
+.runtime-hour-column.selected .runtime-hour-fill {
+  background-color: #ffffff;
+  box-shadow: 0 0 0 2px #66b8ff;
+}
+
+.runtime-hour-label {
+  align-self: end;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 20px;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .runtime-report-empty {
@@ -646,8 +706,22 @@ body {
   background-color: #cccccc;
 }
 
-.light-mode .runtime-hour-track {
-  background-color: rgba(0, 0, 0, 0.15);
+.light-mode .runtime-hour-bars {
+  background-image: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0.18) 1px,
+    transparent 1px,
+    transparent 50%,
+    rgba(0, 0, 0, 0.18) 50%,
+    rgba(0, 0, 0, 0.18) calc(50% + 1px),
+    transparent calc(50% + 1px));
+}
+
+.light-mode .runtime-hour-meter {
+  border-bottom-color: rgba(0, 0, 0, 0.18);
+}
+
+.light-mode .runtime-hour-column.selected .runtime-hour-fill {
+  background-color: #1f6fae;
 }
 
 /* Cursor style over buttons */
