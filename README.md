@@ -1,6 +1,6 @@
 # Air Conditioning Control App
 
-AirConControl is a small Electron kiosk app for controlling and monitoring an MQTT-connected air conditioner. It provides a touchscreen-friendly interface for the setpoint and power controls, current and outside conditions, connection/freshness status, hardware state, command confirmation, and cooling-runtime reports.
+AirConControl is a small Electron kiosk app for controlling and monitoring an MQTT-connected air conditioner. It provides a touchscreen-friendly interface for the setpoint and power controls, current and outside conditions, connection/freshness status, hardware state, command confirmation, and daily climate-history reports.
 
 ## State model
 
@@ -77,11 +77,15 @@ HOME_ASSISTANT_STATE_INTERVAL_MS=60000
 
 `HOME_ASSISTANT_DEVICE_ID` is normalized to lowercase letters, numbers, underscores, and hyphens. Keep it stable: changing it creates a new Home Assistant device. If an old ID must be removed, publish an empty retained payload to its old discovery topic.
 
-## Cooling-runtime reports
+## Climate-history reports
 
 Reports are based on intervals between validated status observations. The compressor state is used when supplied; otherwise `Task: cooling` is used. The final interval is recorded when cooling transitions to idle/off, and the last observation is persisted so short restarts do not discard an open cooling interval.
 
-An unobserved interval is capped at `AIRCON_STALE_AFTER_MS`, then recorded as a coverage gap rather than guessed. The report displays its generation time, local timezone, and gap count. Hour bars use a fixed 60-minute scale and durations under one minute display as seconds.
+Each reported day has two touchscreen views. **Temp** plots sampled current temperature through the day and shades the exact validated intervals where the compressor was running. Tapping the line shows the nearest sample's time, temperature, and cooling state. **Runtime** displays all 24 hourly runtime bars on a fixed 60-minute scale.
+
+Temperature is sampled every five minutes by default and detailed temperature/cooling-interval history is retained for 90 days. These limits can be changed with `TEMPERATURE_HISTORY_SAMPLE_MS` and `DETAILED_HISTORY_RETENTION_DAYS`. Daily and hourly aggregate runtime is retained beyond the detailed-history window.
+
+An unobserved interval is capped at `AIRCON_STALE_AFTER_MS`, then recorded as a coverage gap rather than guessed. Temperature lines break across long observation gaps. The report displays its generation time, local timezone, and gap count; durations under one minute display as seconds.
 
 Runtime state is atomically stored in Electron's per-user data directory as `cooling-runtime-report.json`, with a backup. Existing `cooling-runtime-daily.json` and `cooling-runtime-hourly.json` files are imported automatically the first time the new store is created. Corrupt stores are preserved before recovery.
 
@@ -107,6 +111,8 @@ Available environment variables are listed in `.env.example`:
 - `AIRCON_STALE_AFTER_MS`
 - `WEATHER_STALE_AFTER_MS`
 - `COMMAND_TIMEOUT_MS`
+- `TEMPERATURE_HISTORY_SAMPLE_MS`
+- `DETAILED_HISTORY_RETENTION_DAYS`
 - `HOME_ASSISTANT_DISCOVERY_ENABLED`
 - `HOME_ASSISTANT_DISCOVERY_PREFIX`
 - `HOME_ASSISTANT_STATUS_TOPIC`
@@ -142,7 +148,7 @@ DISPLAY_TYPE=spi sudo ./installer.sh
 
 ## Development and verification
 
-- `npm test` runs behavioral tests for telemetry validation, Home Assistant discovery/state/commands, runtime parsing, state isolation, command acknowledgement/timeouts, persistence, stale gaps, midnight allocation, and legacy migration.
+- `npm test` runs behavioral tests for telemetry validation, Home Assistant discovery/state/commands, runtime parsing, state isolation, command acknowledgement/timeouts, persistence, temperature sampling, cooling intervals, stale gaps, midnight allocation, and legacy migration.
 - `npm run lint` checks all JavaScript entry points for syntax errors.
 - `npm run package` builds an unpacked Electron bundle.
 - `npm run dist` creates installable artifacts with electron-builder.
