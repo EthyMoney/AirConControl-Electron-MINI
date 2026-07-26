@@ -45,7 +45,7 @@ ensure_cmdline_arg() {
   local file_path="$1"
   local arg="$2"
 
-  if ! grep -Eq "(^| )${arg}( |$)" "$file_path"; then
+  if ! tr ' ' '\n' < "$file_path" | grep -Fqx "$arg"; then
     sed -i "1 s|$| ${arg}|" "$file_path"
   fi
 }
@@ -92,7 +92,7 @@ echo "====== Installing APT Packages ======"
 echo ""
 
 apt install -y \
-  vnstat neofetch git lightdm picom net-tools \
+  vnstat neofetch git lightdm picom net-tools plymouth plymouth-label \
   xserver-xorg xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all xserver-xorg-input-libinput \
   xinit x11-xserver-utils openbox npm wavemon \
   libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libdrm2 libgbm1 libasound2 libxkbcommon0 libxshmfence1
@@ -118,6 +118,7 @@ echo '' >> "$AUTOSTART_FILE"
 echo 'xset s off' >> "$AUTOSTART_FILE"
 echo 'xset -dpms' >> "$AUTOSTART_FILE"
 echo 'xset s noblank' >> "$AUTOSTART_FILE"
+echo "xsetroot -solid '#080d12'" >> "$AUTOSTART_FILE"
 echo 'picom -b &' >> "$AUTOSTART_FILE"
 echo 'export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' >> "$AUTOSTART_FILE"
 echo 'while true; do' >> "$AUTOSTART_FILE"
@@ -176,6 +177,7 @@ ensure_cmdline_arg "$BOOT_CMDLINE_FILE" splash
 ensure_cmdline_arg "$BOOT_CMDLINE_FILE" plymouth.ignore-serial-consoles
 ensure_cmdline_arg "$BOOT_CMDLINE_FILE" logo.nologo
 ensure_cmdline_arg "$BOOT_CMDLINE_FILE" loglevel=3
+ensure_cmdline_arg "$BOOT_CMDLINE_FILE" vt.global_cursor_default=0
 
 raspi-config nonint do_boot_splash 0
 raspi-config nonint do_boot_behaviour B4
@@ -184,6 +186,12 @@ if grep -Fqx 'dtoverlay=vc4-fkms-v3d' "$BOOT_CONFIG_FILE"; then
   sed -i 's/^dtoverlay=vc4-fkms-v3d$/dtoverlay=vc4-kms-v3d/' "$BOOT_CONFIG_FILE"
 else
   ensure_config_line "$BOOT_CONFIG_FILE" 'dtoverlay=vc4-kms-v3d'
+fi
+
+if grep -Eq '^disable_splash=' "$BOOT_CONFIG_FILE"; then
+  sed -i 's/^disable_splash=.*/disable_splash=1/' "$BOOT_CONFIG_FILE"
+else
+  ensure_config_line "$BOOT_CONFIG_FILE" 'disable_splash=1'
 fi
 
 echo 'vsync = true;' > "$PICOM_CONF"
@@ -259,6 +267,12 @@ fi
 cd "$APP_DIR"
 /usr/local/bin/npm install
 chown -R "$USERNAME:$USERNAME" "$APP_DIR"
+
+echo ""
+echo "====== Installing Shop Climate Control Boot Splash ======"
+echo ""
+
+DISPLAY_TYPE="$DISPLAY_TYPE" bash "$APP_DIR/plymouth/install-theme.sh"
 
 echo ""
 echo "  ---- Thermostat application installed. ----"

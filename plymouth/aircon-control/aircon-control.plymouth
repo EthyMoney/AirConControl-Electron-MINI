@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Shop Climate Control
+Description=Lightweight 800x480 startup animation for the Shop Climate Control thermostat
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/aircon-control
+ScriptFile=/usr/share/plymouth/themes/aircon-control/aircon-control.script

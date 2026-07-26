@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "render:plymouth": "electron --no-sandbox --headless --disable-gpu --ozone-platform=headless plymouth/render-assets.cjs",
     "lint": "node --check main.js && node --check renderer.js && node --check preload.js && node --check mqtt-controller.js && node --check home-assistant-bridge.js && node --check runtime-store.js && node --check config.js",
     "test": "node --test",
     "package": "electron-builder --dir",
