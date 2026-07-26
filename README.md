@@ -146,6 +146,24 @@ The native DSI display path is the default. For an older SPI display, use:
 DISPLAY_TYPE=spi sudo ./installer.sh
 ```
 
+### Boot splash
+
+The Raspberry Pi installer enables the bundled **Shop Climate Control** Plymouth theme automatically. It includes an 800×480 cooling-themed splash and a lightweight three-dot startup animation designed for the Pi 3. The theme scales and center-crops safely if a different framebuffer size is detected.
+
+To install or refresh only the boot theme on an existing kiosk:
+
+```bash
+sudo ./plymouth/install-theme.sh
+```
+
+The installer selects `aircon-control` as the default theme, disables the Raspberry Pi firmware rainbow screen, adds the native DSI display modules required during early boot, and rebuilds the initramfs. Reboot to see it. The boot command line must contain `quiet splash plymouth.ignore-serial-consoles`; the installer adds these arguments and hides the text cursor.
+
+The checked-in PNGs are ready to deploy. If the source artwork or dot design is changed, regenerate them after `npm install` with:
+
+```bash
+npm run render:plymouth
+```
+
 ## Development and verification
 
 - `npm test` runs behavioral tests for telemetry validation, Home Assistant discovery/state/commands, runtime parsing, state isolation, command acknowledgement/timeouts, persistence, temperature sampling, cooling intervals, stale gaps, midnight allocation, and legacy migration.

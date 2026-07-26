@@ -1,0 +1,118 @@
+# Shop Climate Control Plymouth theme
+# Designed for an 800x480 Raspberry Pi touchscreen, while scaling safely on
+# other framebuffer sizes. Animation uses only six tiny sprites to keep early
+# boot CPU and memory use low on a Raspberry Pi 3.
+
+Window.SetBackgroundTopColor(0.024, 0.039, 0.055);
+Window.SetBackgroundBottomColor(0.024, 0.039, 0.055);
+
+screen.width = Window.GetWidth();
+screen.height = Window.GetHeight();
+screen.x = Window.GetX();
+screen.y = Window.GetY();
+
+# Fill the framebuffer and crop centrally if its aspect ratio is not 5:3.
+background.image = Image("background.png");
+screen.ratio = screen.width / screen.height;
+background.ratio = background.image.GetWidth() / background.image.GetHeight();
+if (screen.ratio > background.ratio)
+    background.scale = screen.width / background.image.GetWidth();
+else
+    background.scale = screen.height / background.image.GetHeight();
+
+background.image = background.image.Scale(
+    background.image.GetWidth() * background.scale,
+    background.image.GetHeight() * background.scale
+);
+background.sprite = Sprite(background.image);
+background.sprite.SetPosition(
+    screen.x + screen.width / 2 - background.image.GetWidth() / 2,
+    screen.y + screen.height / 2 - background.image.GetHeight() / 2,
+    -1000
+);
+
+# Render labels at boot so they adapt to the detected panel resolution.
+title.image = Image.Text("SHOP CLIMATE CONTROL", 0.84, 0.93, 1.0);
+title.target_width = screen.width * 0.48;
+title.scale = title.target_width / title.image.GetWidth();
+title.image = title.image.Scale(
+    title.image.GetWidth() * title.scale,
+    title.image.GetHeight() * title.scale
+);
+title.sprite = Sprite(title.image);
+title.sprite.SetPosition(
+    screen.x + screen.width / 2 - title.image.GetWidth() / 2,
+    screen.y + screen.height * 0.70,
+    10
+);
+
+subtitle.image = Image.Text("STARTING THERMOSTAT", 0.40, 0.72, 1.0);
+subtitle.target_width = screen.width * 0.25;
+subtitle.scale = subtitle.target_width / subtitle.image.GetWidth();
+subtitle.image = subtitle.image.Scale(
+    subtitle.image.GetWidth() * subtitle.scale,
+    subtitle.image.GetHeight() * subtitle.scale
+);
+subtitle.sprite = Sprite(subtitle.image);
+subtitle.sprite.SetPosition(
+    screen.x + screen.width / 2 - subtitle.image.GetWidth() / 2,
+    screen.y + screen.height * 0.80,
+    10
+);
+
+# Three chasing dots provide an indeterminate animation. The bright layer is
+# faded in sequence over a permanently visible dim layer.
+dots.dim = Image("dot-dim.png");
+dots.bright = Image("dot-bright.png");
+dots.gap = dots.dim.GetWidth() * 0.55;
+dots.width = dots.dim.GetWidth() * 3 + dots.gap * 2;
+dots.x = screen.x + screen.width / 2 - dots.width / 2;
+dots.y = screen.y + screen.height * 0.86;
+
+for (index = 0; index < 3; index++) {
+    dot_x = dots.x + index * (dots.dim.GetWidth() + dots.gap);
+    dots.dim_sprite[index] = Sprite(dots.dim);
+    dots.dim_sprite[index].SetPosition(dot_x, dots.y, 20);
+    dots.bright_sprite[index] = Sprite(dots.bright);
+    dots.bright_sprite[index].SetPosition(dot_x, dots.y, 21);
+    dots.bright_sprite[index].SetOpacity(0.08);
+}
+
+global.frame = 0;
+
+fun refresh_callback() {
+    global.frame++;
+
+    for (index = 0; index < 3; index++) {
+        phase = global.frame / 90 * 2 * Math.Pi - index * 2 * Math.Pi / 3;
+        opacity = 0.12 + 0.88 * (0.5 + 0.5 * Math.Sin(phase));
+        dots.bright_sprite[index].SetOpacity(opacity);
+    }
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# Surface important system messages without displacing the branded layout.
+fun message_callback(text) {
+    if (global.message_sprite)
+        global.message_sprite.SetOpacity(0);
+
+    if (text) {
+        message_image = Image.Text(text, 0.78, 0.84, 0.90);
+        global.message_sprite = Sprite(message_image);
+        global.message_sprite.SetPosition(
+            screen.x + screen.width / 2 - message_image.GetWidth() / 2,
+            screen.y + screen.height - message_image.GetHeight() - 10,
+            100
+        );
+    }
+}
+
+Plymouth.SetMessageFunction(message_callback);
+
+fun quit_callback() {
+    for (index = 0; index < 3; index++)
+        dots.bright_sprite[index].SetOpacity(1.0);
+}
+
+Plymouth.SetQuitFunction(quit_callback);
