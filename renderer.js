@@ -7,12 +7,14 @@ const STATUS_CLASS_NAMES = [
   'status-unknown',
   'status-stale'
 ];
-const MIN_SET_TEMPERATURE = 50;
-const MAX_SET_TEMPERATURE = 90;
+const { min: MIN_SET_TEMPERATURE, max: MAX_SET_TEMPERATURE } = window.airconApi.setTemperatureRange;
 const TEMPERATURE_COMMIT_DELAY_MS = 750;
+const COMMAND_CONFIRMED_LINGER_MS = 4000;
+const COMMAND_ERROR_LINGER_MS = 15000;
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const TEMPERATURE_CHART_WIDTH = 720;
 const TEMPERATURE_CHART_HEIGHT = 280;
+const TEMPERATURE_CHART_MIN_HEIGHT = 180;
 const TEMPERATURE_LINE_GAP_MS = 15 * 60 * 1000;
 
 const currentStatusLabel = document.getElementById('currentStatusLabel');
@@ -154,8 +156,14 @@ function getLiveRuntimeMs(reported, airconState) {
   const observationEnd = airconState.freshness === 'stale'
     ? airconState.freshnessChangedAt
     : Date.now();
-  const elapsed = isRunning && Number.isFinite(airconState.receivedAt)
-    ? Math.max(0, observationEnd - airconState.receivedAt)
+  // Measure from when the runtime counter itself was read, not from the latest status message.
+  // A payload that omits Runtime carries the previous value forward while receivedAt advances,
+  // so anchoring to receivedAt would freeze this label until Runtime is reported again.
+  const runtimeReadAt = Number.isFinite(reported.runtimeObservedAt)
+    ? reported.runtimeObservedAt
+    : airconState.receivedAt;
+  const elapsed = isRunning && Number.isFinite(runtimeReadAt)
+    ? Math.max(0, observationEnd - runtimeReadAt)
     : 0;
   return reported.runtimeMs + elapsed;
 }
@@ -180,13 +188,19 @@ function renderCommand(command) {
   const desiredLabel = command.type === 'set-temperature'
     ? `Setting ${command.desired.setTemp}°`
     : `Turning ${command.desired.enabled ? 'on' : 'off'}`;
+  // Both outcomes linger briefly and then clear. A failure that never expires turns a transient
+  // hiccup into permanent screen furniture on a kiosk nobody is standing in front of.
+  const settledFor = Date.now() - command.completedAt;
   if (command.status === 'pending' || command.status === 'published') {
     commandStatusLabel.textContent = `${desiredLabel}… awaiting confirmation`;
     commandStatusLabel.className = 'status-command command-pending';
-  } else if (command.status === 'confirmed' && Date.now() - command.completedAt < 4000) {
+  } else if (command.status === 'confirmed' && settledFor < COMMAND_CONFIRMED_LINGER_MS) {
     commandStatusLabel.textContent = `${desiredLabel} — confirmed`;
     commandStatusLabel.className = 'status-command command-confirmed';
-  } else if (command.status === 'failed' || command.status === 'timed-out') {
+  } else if (
+    (command.status === 'failed' || command.status === 'timed-out')
+    && settledFor < COMMAND_ERROR_LINGER_MS
+  ) {
     commandStatusLabel.textContent = `${desiredLabel} failed: ${command.error}`;
     commandStatusLabel.className = 'status-command command-error';
   } else {
@@ -410,6 +424,21 @@ function formatHistoryTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+// The viewBox is sized to the space the chart is actually given. A fixed viewBox would be
+// letterboxed by preserveAspectRatio in any window whose proportions differ from the 800x480
+// panel, leaving dead space above and below the plot once the desktop window is resized.
+function measureChartViewBox(summaryElement) {
+  const width = Math.round(temperatureHistoryChart.clientWidth) || TEMPERATURE_CHART_WIDTH;
+  // The summary shares the flex column with the chart, so its box and the column gap come off
+  // the height available to the plot.
+  const gap = Number.parseFloat(getComputedStyle(temperatureHistoryChart).rowGap) || 0;
+  const available = Math.round(temperatureHistoryChart.clientHeight - summaryElement.offsetHeight - gap);
+  return {
+    width: Math.max(TEMPERATURE_CHART_WIDTH / 2, width),
+    height: Math.max(TEMPERATURE_CHART_MIN_HEIGHT, available || TEMPERATURE_CHART_HEIGHT)
+  };
+}
+
 function renderTemperatureHistoryChart(dayKey) {
   temperatureHistoryChart.innerHTML = '';
   const samples = (runtimeReportCache?.temperatureHistory?.[dayKey] || [])
@@ -441,16 +470,19 @@ function renderTemperatureHistoryChart(dayKey) {
   const summary = document.createElement('div');
   summary.className = 'temperature-history-summary';
   summary.textContent = `${observedMinimum.toFixed(1)}–${observedMaximum.toFixed(1)}°F · blue zones = AC running · tap line for details`;
+  // Attached before measuring so the chart is sized against the space actually left over.
+  temperatureHistoryChart.appendChild(summary);
 
+  const chartSize = measureChartViewBox(summary);
   const svg = createSvgElement('svg', {
     class: 'temperature-history-svg',
-    viewBox: `0 0 ${TEMPERATURE_CHART_WIDTH} ${TEMPERATURE_CHART_HEIGHT}`,
+    viewBox: `0 0 ${chartSize.width} ${chartSize.height}`,
     role: 'img',
     'aria-label': `Current temperature history for ${formatReportDate(dayKey)}`
   });
   const margin = { top: 12, right: 12, bottom: 28, left: 46 };
-  const plotWidth = TEMPERATURE_CHART_WIDTH - margin.left - margin.right;
-  const plotHeight = TEMPERATURE_CHART_HEIGHT - margin.top - margin.bottom;
+  const plotWidth = chartSize.width - margin.left - margin.right;
+  const plotHeight = chartSize.height - margin.top - margin.bottom;
   const xForTimestamp = (timestamp) => margin.left
     + ((timestamp - dayStart) / (dayEnd - dayStart)) * plotWidth;
   const yForTemperature = (temperature) => margin.top
@@ -476,7 +508,7 @@ function renderTemperatureHistoryChart(dayKey) {
       class: 'temperature-history-grid-line',
       x1: margin.left,
       y1: y,
-      x2: TEMPERATURE_CHART_WIDTH - margin.right,
+      x2: chartSize.width - margin.right,
       y2: y
     }));
     svg.appendChild(createSvgElement('text', {
@@ -501,7 +533,7 @@ function renderTemperatureHistoryChart(dayKey) {
     svg.appendChild(createSvgElement('text', {
       class: 'temperature-history-axis-label',
       x,
-      y: TEMPERATURE_CHART_HEIGHT - 7,
+      y: chartSize.height - 7,
       'text-anchor': hour === 0 ? 'start' : 'middle'
     }, formatHourLabel(hour)));
   }
@@ -528,9 +560,9 @@ function renderTemperatureHistoryChart(dayKey) {
   svg.appendChild(selection);
   svg.addEventListener('click', (event) => {
     const bounds = svg.getBoundingClientRect();
-    const svgX = ((event.clientX - bounds.left) / bounds.width) * TEMPERATURE_CHART_WIDTH;
+    const svgX = ((event.clientX - bounds.left) / bounds.width) * chartSize.width;
     const selectedTimestamp = dayStart
-      + ((Math.max(margin.left, Math.min(TEMPERATURE_CHART_WIDTH - margin.right, svgX)) - margin.left) / plotWidth)
+      + ((Math.max(margin.left, Math.min(chartSize.width - margin.right, svgX)) - margin.left) / plotWidth)
       * (dayEnd - dayStart);
     const sample = samples.reduce((nearest, candidate) => (
       Math.abs(candidate.at - selectedTimestamp) < Math.abs(nearest.at - selectedTimestamp) ? candidate : nearest
@@ -542,7 +574,7 @@ function renderTemperatureHistoryChart(dayKey) {
     summary.textContent = `${formatHistoryTime(sample.at)} · ${sample.value.toFixed(1)}°F · AC ${cooling ? 'running' : 'off'}`;
   });
 
-  temperatureHistoryChart.append(summary, svg);
+  temperatureHistoryChart.appendChild(svg);
 }
 
 function renderRuntimeHourlyChart(dayKey) {
@@ -689,6 +721,16 @@ runtimeReportCloseButton.addEventListener('click', closeRuntimeReport);
 runtimeReportDayBackButton.addEventListener('click', closeRuntimeReportDay);
 temperatureHistoryViewButton.addEventListener('click', () => setRuntimeReportDayView('temperature'));
 runtimeHistoryViewButton.addEventListener('click', () => setRuntimeReportDayView('runtime'));
+
+// The desktop window can be resized; the chart's viewBox is sized at build time, so rebuild it.
+let chartResizeTimeout = null;
+window.addEventListener('resize', () => {
+  if (!selectedRuntimeReportDay || temperatureHistoryChart.classList.contains('hidden')) {
+    return;
+  }
+  clearTimeout(chartResizeTimeout);
+  chartResizeTimeout = setTimeout(() => renderTemperatureHistoryChart(selectedRuntimeReportDay), 150);
+});
 
 window.airconApi.onState(acceptState);
 window.airconApi.getState().then(acceptState).catch((error) => {

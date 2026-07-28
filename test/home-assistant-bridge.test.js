@@ -32,6 +32,10 @@ class FakeRuntimeStore extends EventEmitter {
     };
   }
 
+  getTodayRuntimeMs() {
+    return 125000;
+  }
+
   async flush() {}
 }
 
@@ -122,9 +126,7 @@ test('builds retained normalized state and availability from the canonical snaps
       }
     },
     command: { source: 'home-assistant', type: 'set-temperature', status: 'confirmed', error: null }
-  }, {
-    daily: { [getLocalDayKey(new Date(now))]: 125000 }
-  }, now);
+  }, 125000, now);
 
   assert.equal(state.available, true);
   assert.equal(state.mode, 'cool');

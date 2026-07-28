@@ -242,7 +242,9 @@ class RuntimeStore extends EventEmitter {
     temperatureSampleIntervalMs = TEMPERATURE_SAMPLE_INTERVAL_MS,
     detailedHistoryRetentionDays = DETAILED_HISTORY_RETENTION_DAYS,
     now = () => Date.now(),
-    saveDelayMs = 250
+    saveDelayMs = 30000,
+    criticalSaveDelayMs = 1000,
+    backupIntervalMs = 3600000
   }) {
     super();
     this.filePath = filePath;
@@ -254,8 +256,13 @@ class RuntimeStore extends EventEmitter {
     this.detailedHistoryRetentionDays = detailedHistoryRetentionDays;
     this.now = now;
     this.saveDelayMs = saveDelayMs;
+    this.criticalSaveDelayMs = Math.min(criticalSaveDelayMs, saveDelayMs);
+    this.backupIntervalMs = backupIntervalMs;
     this.data = createEmptyData();
     this.saveTimer = null;
+    this.saveTimerDelayMs = null;
+    this.lastBackupAt = null;
+    this.lastPruneDayKey = null;
     this.writeChain = Promise.resolve();
     this.dirty = false;
     this.initialized = false;
@@ -358,6 +365,7 @@ class RuntimeStore extends EventEmitter {
   pruneDetailedHistory() {
     const cutoff = new Date(this.now());
     cutoff.setHours(0, 0, 0, 0);
+    this.lastPruneDayKey = getDayKey(cutoff);
     cutoff.setDate(cutoff.getDate() - Math.max(0, this.detailedHistoryRetentionDays - 1));
     const cutoffDayKey = getDayKey(cutoff);
     for (const collection of [this.data.temperatureHistory, this.data.coolingIntervals]) {
@@ -396,10 +404,33 @@ class RuntimeStore extends EventEmitter {
       }
     }
 
+    const coolingChanged = previous.cooling !== cooling;
     addTemperatureSample(this.data, temperature, receivedAt, this.temperatureSampleIntervalMs);
     this.data.tracker = { cooling, receivedAt };
-    this.pruneDetailedHistory();
-    this.scheduleSave();
+    // Retention is day-granular, so re-pruning on every observation only repeats work.
+    if (getDayKey(new Date(receivedAt)) !== this.lastPruneDayKey) {
+      this.pruneDetailedHistory();
+    }
+    this.scheduleSave(coolingChanged ? this.criticalSaveDelayMs : this.saveDelayMs);
+  }
+
+  // The Home Assistant state payload only needs today's cooling total. Deriving it directly
+  // avoids cloning the entire retained history on every publish.
+  getTodayRuntimeMs(now = this.now()) {
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayKey = getDayKey(dayStart);
+    let total = Number(this.data.daily[dayKey] || 0);
+
+    const tracker = this.data.tracker;
+    if (tracker.cooling === true && Number.isFinite(tracker.receivedAt)) {
+      const liveEnd = Math.min(now, tracker.receivedAt + this.maxObservationGapMs);
+      const liveStart = Math.max(tracker.receivedAt, dayStart.getTime());
+      if (liveEnd > liveStart) {
+        total += liveEnd - liveStart;
+      }
+    }
+    return Math.max(0, total);
   }
 
   getReport() {
@@ -432,16 +463,24 @@ class RuntimeStore extends EventEmitter {
     };
   }
 
-  scheduleSave() {
+  scheduleSave(delayMs = this.saveDelayMs) {
     this.dirty = true;
+    // An armed timer is a coalescing window, not a debounce: later observations ride along with
+    // it instead of pushing it back. A shorter request still wins, so a cooling edge is not made
+    // to wait out a window that a routine sample opened.
     if (this.saveTimer) {
-      return;
+      if (delayMs >= this.saveTimerDelayMs) {
+        return;
+      }
+      clearTimeout(this.saveTimer);
     }
 
+    this.saveTimerDelayMs = delayMs;
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
+      this.saveTimerDelayMs = null;
       this.queueWrite();
-    }, this.saveDelayMs);
+    }, delayMs);
     this.saveTimer.unref?.();
   }
 
@@ -451,28 +490,52 @@ class RuntimeStore extends EventEmitter {
     }
 
     this.dirty = false;
-    const serialized = `${JSON.stringify(this.data, null, 2)}\n`;
+    // Written compactly: at full retention the indented form is roughly twice the bytes, and
+    // this file is rewritten in its entirety on every save.
+    const serialized = `${JSON.stringify(this.data)}\n`;
+    const withBackup = this.shouldRefreshBackup();
     this.writeChain = this.writeChain
-      .then(() => this.atomicWrite(serialized))
+      .then(() => this.atomicWrite(serialized, withBackup))
       .catch((error) => {
         this.emit('error', error);
       });
   }
 
-  async atomicWrite(content) {
+  shouldRefreshBackup() {
+    if (this.skipBackupOnce) {
+      this.skipBackupOnce = false;
+      return false;
+    }
+    // Copying the previous file doubles the bytes written, so the recovery point is refreshed on
+    // its own cadence rather than on every save.
+    return !Number.isFinite(this.lastBackupAt)
+      || (this.now() - this.lastBackupAt) >= this.backupIntervalMs;
+  }
+
+  async atomicWrite(content, withBackup = true) {
     const temporaryPath = `${this.filePath}.${process.pid}.${this.now()}.tmp`;
-    await fs.promises.writeFile(temporaryPath, content, 'utf8');
+    let handle;
+    try {
+      handle = await fs.promises.open(temporaryPath, 'w');
+      await handle.writeFile(content, 'utf8');
+      // Without this the rename below can land before the contents do, which on a kiosk that
+      // gets power-cycled is exactly how an empty or truncated store appears.
+      await handle.sync();
+    } finally {
+      await handle?.close();
+    }
 
     try {
-      if (this.skipBackupOnce) {
-        this.skipBackupOnce = false;
-      } else {
+      if (withBackup) {
         try {
           await fs.promises.copyFile(this.filePath, this.backupPath);
+          this.lastBackupAt = this.now();
         } catch (error) {
           if (error.code !== 'ENOENT') {
             throw error;
           }
+          // Nothing to back up yet; the rename below creates the primary, and leaving
+          // lastBackupAt unset lets the next save take the first real backup.
         }
       }
 
@@ -491,6 +554,7 @@ class RuntimeStore extends EventEmitter {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
+      this.saveTimerDelayMs = null;
     }
     this.queueWrite();
     await this.writeChain;

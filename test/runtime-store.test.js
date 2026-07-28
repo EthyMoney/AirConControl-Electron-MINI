@@ -123,6 +123,106 @@ test('samples daily temperatures and preserves exact cooling zones', async (t) =
   await store.flush();
 });
 
+test('the cheap today total agrees with the full report, including the open interval', async (t) => {
+  let now = new Date(2026, 6, 14, 9, 0, 0).getTime();
+  const { store } = await createStore(t, { now: () => now, maxObservationGapMs: 300000 });
+  const dayKey = getDayKey(new Date(now));
+
+  // A closed interval.
+  store.recordObservation({ cooling: true, receivedAt: now });
+  now += 120000;
+  store.recordObservation({ cooling: false, receivedAt: now });
+  assert.equal(store.getTodayRuntimeMs(), 120000);
+  assert.equal(store.getTodayRuntimeMs(), store.getReport().daily[dayKey]);
+
+  // An interval still open accrues live, and stops accruing past the observation gap cap.
+  store.recordObservation({ cooling: true, receivedAt: now });
+  now += 60000;
+  assert.equal(store.getTodayRuntimeMs(), 180000);
+  assert.equal(store.getTodayRuntimeMs(), store.getReport().daily[dayKey]);
+  now += 600000;
+  assert.equal(store.getTodayRuntimeMs(), 120000 + 300000);
+  assert.equal(store.getTodayRuntimeMs(), store.getReport().daily[dayKey]);
+  await store.flush();
+});
+
+test('an interval running through midnight is not counted against the new day', async (t) => {
+  let now = new Date(2026, 6, 14, 23, 59, 0).getTime();
+  const { store } = await createStore(t, { now: () => now, maxObservationGapMs: 600000 });
+  store.recordObservation({ cooling: true, receivedAt: now });
+
+  now = new Date(2026, 6, 15, 0, 2, 0).getTime();
+  // Only the two minutes after midnight belong to the new day.
+  assert.equal(store.getTodayRuntimeMs(), 120000);
+  assert.equal(store.getTodayRuntimeMs(), store.getReport().daily[getDayKey(new Date(now))]);
+  await store.flush();
+});
+
+test('saves are coalesced and the backup is refreshed on its own cadence', async (t) => {
+  let now = new Date(2026, 6, 16, 8, 0, 0).getTime();
+  const { filePath, store } = await createStore(t, {
+    now: () => now,
+    saveDelayMs: 100000,
+    backupIntervalMs: 3600000
+  });
+
+  store.recordObservation({ cooling: true, receivedAt: now });
+  await store.flush();
+  const stored = await fs.promises.readFile(filePath, 'utf8');
+  // Written compactly: the file is rewritten whole on every save.
+  assert.equal(stored.includes('\n  "daily"'), false);
+  assert.equal(JSON.parse(stored).tracker.cooling, true);
+
+  // The first save creates the primary, so the first real backup lands on the save after it.
+  now += 60000;
+  store.recordObservation({ cooling: false, receivedAt: now });
+  await store.flush();
+  const backupAfterSecond = await fs.promises.readFile(`${filePath}.bak`, 'utf8');
+
+  // Within the backup window further saves leave the recovery point alone.
+  now += 60000;
+  store.recordObservation({ cooling: true, receivedAt: now });
+  await store.flush();
+  assert.equal(await fs.promises.readFile(`${filePath}.bak`, 'utf8'), backupAfterSecond);
+
+  // Past the window it is refreshed again.
+  now += 3600000;
+  store.recordObservation({ cooling: false, receivedAt: now });
+  await store.flush();
+  assert.notEqual(await fs.promises.readFile(`${filePath}.bak`, 'utf8'), backupAfterSecond);
+});
+
+test('a cooling edge is persisted promptly instead of waiting out the save window', async (t) => {
+  let now = new Date(2026, 6, 17, 8, 0, 0).getTime();
+  const { store } = await createStore(t, {
+    now: () => now,
+    saveDelayMs: 100000,
+    criticalSaveDelayMs: 5
+  });
+
+  store.recordObservation({ cooling: false, receivedAt: now });
+  assert.equal(store.saveTimerDelayMs, 5, 'the first observation is itself an edge');
+
+  // A routine sample rides along in the open window rather than pushing it back.
+  now += 1000;
+  store.recordObservation({ cooling: false, temperature: 74, receivedAt: now });
+  assert.equal(store.saveTimerDelayMs, 5);
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await store.flush();
+
+  // A routine sample alone opens only the long window.
+  now += 1000;
+  store.recordObservation({ cooling: false, temperature: 73, receivedAt: now });
+  assert.equal(store.saveTimerDelayMs, 100000);
+
+  // An edge arriving inside that window shortens it.
+  now += 1000;
+  store.recordObservation({ cooling: true, receivedAt: now });
+  assert.equal(store.saveTimerDelayMs, 5);
+  await store.flush();
+});
+
 test('migrates version 2 stores with empty detailed history', () => {
   const { sanitizeStoredData } = require('../runtime-store');
   const migrated = sanitizeStoredData({

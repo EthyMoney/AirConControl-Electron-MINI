@@ -44,6 +44,9 @@ body {
 }
 
 .container {
+  /* Anchors .runtime-report-screen to the card. Without it the overlay resolves against the
+     viewport and fills the whole window on any display that is not exactly 800x480. */
+  position: relative;
   width: 100%;
   height: 100vh;
   max-width: 800px;
