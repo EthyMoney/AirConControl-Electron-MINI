@@ -4,8 +4,14 @@ const { HomeAssistantBridge } = require('./home-assistant-bridge');
 const { RuntimeStore } = require('./runtime-store');
 const {
   AIRCON_STALE_AFTER_MS,
+  AIRCON_STALE_RETRY_MS,
   COMMAND_TIMEOUT_MS,
   DETAILED_HISTORY_RETENTION_DAYS,
+  MAX_SET_TEMPERATURE,
+  MIN_SET_TEMPERATURE,
+  RUNTIME_BACKUP_INTERVAL_MS,
+  RUNTIME_CRITICAL_SAVE_MS,
+  RUNTIME_SAVE_INTERVAL_MS,
   HOME_ASSISTANT_BASE_TOPIC,
   HOME_ASSISTANT_DEVICE_ID,
   HOME_ASSISTANT_DEVICE_NAME,
@@ -264,7 +270,7 @@ function parseCommand(command) {
   }
   if (match[1].startsWith('set-')) {
     const setTemp = Number.parseInt(match[2], 10);
-    if (setTemp < 50 || setTemp > 90) {
+    if (setTemp < MIN_SET_TEMPERATURE || setTemp > MAX_SET_TEMPERATURE) {
       return null;
     }
     return { raw: command, type: 'set-temperature', desired: { setTemp } };
@@ -319,6 +325,7 @@ class MqttController extends EventEmitter {
     this.stateTopic = options.stateTopic || MQTT_TOPIC_AIRCON_STATE;
     this.weatherTopic = options.weatherTopic || MQTT_TOPIC_TEMPEST_STATS;
     this.airconStaleAfterMs = options.airconStaleAfterMs || AIRCON_STALE_AFTER_MS;
+    this.airconStaleRetryMs = options.airconStaleRetryMs || AIRCON_STALE_RETRY_MS;
     this.weatherStaleAfterMs = options.weatherStaleAfterMs || WEATHER_STALE_AFTER_MS;
     this.commandTimeoutMs = options.commandTimeoutMs || COMMAND_TIMEOUT_MS;
     this.homeAssistantStateIntervalMs = options.homeAssistantStateIntervalMs || HOME_ASSISTANT_STATE_INTERVAL_MS;
@@ -329,6 +336,9 @@ class MqttController extends EventEmitter {
       maxObservationGapMs: this.airconStaleAfterMs,
       temperatureSampleIntervalMs: options.temperatureHistorySampleMs || TEMPERATURE_HISTORY_SAMPLE_MS,
       detailedHistoryRetentionDays: options.detailedHistoryRetentionDays || DETAILED_HISTORY_RETENTION_DAYS,
+      saveDelayMs: options.runtimeSaveIntervalMs || RUNTIME_SAVE_INTERVAL_MS,
+      criticalSaveDelayMs: options.runtimeCriticalSaveMs || RUNTIME_CRITICAL_SAVE_MS,
+      backupIntervalMs: options.runtimeBackupIntervalMs || RUNTIME_BACKUP_INTERVAL_MS,
       now: this.now
     });
     this.homeAssistantBridge = options.homeAssistantBridge || new HomeAssistantBridge({
@@ -549,14 +559,33 @@ class MqttController extends EventEmitter {
     }
     this[timerProperty] = setTimeout(() => {
       this[timerProperty] = null;
-      this.state[domain].freshness = 'stale';
-      this.state[domain].freshnessChangedAt = this.now();
-      this.emitState();
+      const wasStale = this.state[domain].freshness === 'stale';
+      if (!wasStale) {
+        this.state[domain].freshness = 'stale';
+        this.state[domain].freshnessChangedAt = this.now();
+        this.emitState();
+      }
       if (domain === 'aircon') {
+        // Keep polling on a shorter cadence instead of asking exactly once. A single lost request
+        // or an unresponsive controller would otherwise leave the panel stale until MQTT
+        // reconnects, which may never happen while the broker link stays healthy.
         this.requestStatus();
+        this.scheduleStaleRetry();
       }
     }, delay);
     this[timerProperty].unref?.();
+  }
+
+  scheduleStaleRetry() {
+    if (this.airconFreshnessTimer) {
+      clearTimeout(this.airconFreshnessTimer);
+    }
+    this.airconFreshnessTimer = setTimeout(() => {
+      this.airconFreshnessTimer = null;
+      this.requestStatus();
+      this.scheduleStaleRetry();
+    }, this.airconStaleRetryMs);
+    this.airconFreshnessTimer.unref?.();
   }
 
   requestStatus() {
@@ -757,10 +786,11 @@ class MqttController extends EventEmitter {
       return;
     }
     const snapshot = this.getSnapshot();
+    const now = this.now();
     const statePayload = this.homeAssistantBridge.buildStatePayload(
       snapshot,
-      this.runtimeStore.getReport(),
-      this.now()
+      this.runtimeStore.getTodayRuntimeMs(now),
+      now
     );
     const statePublished = await this.publishTopic(
       this.homeAssistantBridge.topics.state,

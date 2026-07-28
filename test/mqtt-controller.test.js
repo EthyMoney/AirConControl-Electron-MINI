@@ -27,6 +27,10 @@ class FakeRuntimeStore extends EventEmitter {
     return { daily: {}, hourly: {}, gaps: [] };
   }
 
+  getTodayRuntimeMs() {
+    return 0;
+  }
+
   async flush() {}
 }
 
@@ -168,6 +172,43 @@ test('freshness deadlines and command timeouts become explicit state', async () 
   assert.equal(snapshot.aircon.freshness, 'stale');
   assert.equal(snapshot.weather.freshness, 'stale');
   assert.equal(snapshot.command.status, 'timed-out');
+  await controller.stop();
+});
+
+test('a stale air conditioner keeps being polled instead of being asked exactly once', async () => {
+  const runtimeStore = new FakeRuntimeStore();
+  const client = new FakeMqttClient();
+  const controller = new MqttController({
+    mqttLibrary: { connect: () => client },
+    runtimeStore,
+    homeAssistantBridge: null,
+    commandTopic: 'aircon/command',
+    stateTopic: 'aircon/state',
+    weatherTopic: 'weather/state',
+    airconStaleAfterMs: 20,
+    airconStaleRetryMs: 20,
+    weatherStaleAfterMs: 100000
+  });
+
+  await controller.initialize();
+  controller.start();
+  client.emit('connect');
+  controller.handleAirconMessage(JSON.stringify({ Task: 'idle', Enabled: true, Temp: 73, SetTemp: 72 }));
+
+  const statusRequests = () => client.published.filter((entry) => entry.message === 'status').length;
+  const beforeStale = statusRequests();
+  await new Promise((resolve) => setTimeout(resolve, 110));
+
+  // One request on going stale, then repeats on the retry cadence.
+  assert.ok(
+    statusRequests() - beforeStale >= 3,
+    `expected repeated status polls, saw ${statusRequests() - beforeStale}`
+  );
+  assert.equal(controller.getSnapshot().aircon.freshness, 'stale');
+
+  // A fresh status ends the retry loop and restores the normal deadline.
+  controller.handleAirconMessage(JSON.stringify({ Task: 'cooling', Enabled: true, Temp: 71, SetTemp: 70 }));
+  assert.equal(controller.getSnapshot().aircon.freshness, 'fresh');
   await controller.stop();
 });
 

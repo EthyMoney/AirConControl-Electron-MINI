@@ -85,9 +85,9 @@ Each reported day has two touchscreen views. **Temp** plots sampled current temp
 
 Temperature is sampled every five minutes by default and detailed temperature/cooling-interval history is retained for 90 days. These limits can be changed with `TEMPERATURE_HISTORY_SAMPLE_MS` and `DETAILED_HISTORY_RETENTION_DAYS`. Daily and hourly aggregate runtime is retained beyond the detailed-history window.
 
-An unobserved interval is capped at `AIRCON_STALE_AFTER_MS`, then recorded as a coverage gap rather than guessed. Temperature lines break across long observation gaps. The report displays its generation time, local timezone, and gap count; durations under one minute display as seconds.
+An unobserved interval is capped at `AIRCON_STALE_AFTER_MS`, then recorded as a coverage gap rather than guessed. Once that deadline passes the display keeps re-requesting a status every `AIRCON_STALE_RETRY_MS` until one arrives. Temperature lines break across long observation gaps. The report displays its generation time, local timezone, and gap count; durations under one minute display as seconds.
 
-Runtime state is atomically stored in Electron's per-user data directory as `cooling-runtime-report.json`, with a backup. Existing `cooling-runtime-daily.json` and `cooling-runtime-hourly.json` files are imported automatically the first time the new store is created. Corrupt stores are preserved before recovery.
+Runtime state is atomically stored in Electron's per-user data directory as `cooling-runtime-report.json`, with a backup. The file is written whole on every save, so saves are coalesced into a `RUNTIME_SAVE_INTERVAL_MS` window (30s) rather than issued per status message — this matters on a Pi, where the store approaches 1 MB at full retention and the SD card pays for every rewrite. Cooling transitions decide how runtime is attributed and are flushed within `RUNTIME_CRITICAL_SAVE_MS` instead of waiting out that window, and the `.bak` recovery point is refreshed on its own `RUNTIME_BACKUP_INTERVAL_MS` cadence (1h) so a routine save does not write the data twice. A crash can therefore lose at most one save window of the open interval. Writes are `fsync`ed before the atomic rename. Existing `cooling-runtime-daily.json` and `cooling-runtime-hourly.json` files are imported automatically the first time the new store is created. Corrupt stores are preserved before recovery.
 
 ## Setup
 
@@ -109,10 +109,14 @@ Available environment variables are listed in `.env.example`:
 - `MQTT_TOPIC_AIRCON_STATE`
 - `MQTT_TOPIC_TEMPEST_STATS`
 - `AIRCON_STALE_AFTER_MS`
+- `AIRCON_STALE_RETRY_MS`
 - `WEATHER_STALE_AFTER_MS`
 - `COMMAND_TIMEOUT_MS`
 - `TEMPERATURE_HISTORY_SAMPLE_MS`
 - `DETAILED_HISTORY_RETENTION_DAYS`
+- `RUNTIME_SAVE_INTERVAL_MS`
+- `RUNTIME_CRITICAL_SAVE_MS`
+- `RUNTIME_BACKUP_INTERVAL_MS`
 - `HOME_ASSISTANT_DISCOVERY_ENABLED`
 - `HOME_ASSISTANT_DISCOVERY_PREFIX`
 - `HOME_ASSISTANT_STATUS_TOPIC`
@@ -156,7 +160,14 @@ npm run dist:win:desktop     # build a Windows installer into dist-desktop/
 npm run package:win:desktop  # unpacked bundle only, into dist-desktop/win-unpacked/
 ```
 
-Desktop mode is selected by the `--desktop` argument, the `AIRCON_DESKTOP_MODE` environment variable, or the `airconDesktopMode` flag that the two build scripts bake into the packaged app. The kiosk build is unaffected, and both share the same MQTT configuration and runtime history.
+Desktop mode is selected by the `--desktop` argument, the `AIRCON_DESKTOP_MODE` environment variable, or the `airconDesktopMode` flag that the two build scripts bake into the packaged app. The kiosk build is unaffected.
+
+A desktop copy is meant to run **alongside** the always-on wall display, so it defaults to staying out of the wall display's way:
+
+- **The Home Assistant bridge is off.** Discovery, state, and availability are retained topics with a single owner; two publishers would fight over them, and the desktop app closing would publish `offline` and knock the entity out. Set `HOME_ASSISTANT_DISCOVERY_ENABLED=1` to override this if you are running a desktop copy on its own.
+- **The MQTT client ID gets a `_desktop` suffix.** Brokers evict the older session when a second client connects with the same ID, so sharing one would make the two instances disconnect each other in a loop.
+
+Both instances still read the same MQTT topics and can send commands. Climate history is per-machine: it is derived from what that instance observed, and lives in its own per-user data directory.
 
 ### Boot splash
 

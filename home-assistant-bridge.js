@@ -1,7 +1,5 @@
 const packageMetadata = require('./package.json');
-
-const MIN_SET_TEMPERATURE = 50;
-const MAX_SET_TEMPERATURE = 90;
+const { MAX_SET_TEMPERATURE, MIN_SET_TEMPERATURE } = require('./config');
 
 function sanitizeIdentifier(value, fallback) {
   const sanitized = String(value || '')
@@ -203,11 +201,12 @@ class HomeAssistantBridge {
     };
   }
 
-  buildStatePayload(snapshot, runtimeReport, now = Date.now()) {
+  // coolingRuntimeTodayMs is passed in rather than derived from a full runtime report: the report
+  // clones every retained day, and this payload only ever needed today's total.
+  buildStatePayload(snapshot, coolingRuntimeTodayMs, now = Date.now()) {
     const aircon = snapshot.aircon || {};
     const reported = aircon.reported || null;
-    const dayKey = getLocalDayKey(new Date(now));
-    const runtimeMs = Number(runtimeReport?.daily?.[dayKey] || 0);
+    const runtimeMs = Number(coolingRuntimeTodayMs) || 0;
     const available = snapshot.mqtt?.status === 'connected'
       && aircon.freshness === 'fresh'
       && Boolean(reported);

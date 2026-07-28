@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { DESKTOP_MODE, windowIcon } = require('./config');
+const { DESKTOP_MODE, MAX_SET_TEMPERATURE, MIN_SET_TEMPERATURE, windowIcon } = require('./config');
 const { MqttController } = require('./mqtt-controller');
 
 let mainWindow = null;
@@ -32,7 +32,11 @@ function createWindow() {
     title: 'AirConControl',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      additionalArguments: DESKTOP_MODE ? ['--desktop'] : [],
+      additionalArguments: [
+        ...(DESKTOP_MODE ? ['--desktop'] : []),
+        `--set-temp-min=${MIN_SET_TEMPERATURE}`,
+        `--set-temp-max=${MAX_SET_TEMPERATURE}`
+      ],
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true
