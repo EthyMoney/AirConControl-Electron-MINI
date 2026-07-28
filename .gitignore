@@ -125,5 +125,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# electron-builder output for the windowed Windows desktop build
+dist-desktop
 cooling-runtime-daily.json
 cooling-runtime-hourly.json

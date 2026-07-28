@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('airconApi', {
+  desktopMode: process.argv.includes('--desktop'),
   getState() {
     return ipcRenderer.invoke('aircon:get-state');
   },

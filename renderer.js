@@ -704,6 +704,11 @@ setInterval(() => {
   checkAndSetTheme();
 }, 1000);
 
-document.body.style.cursor = 'none';
-document.addEventListener('mousemove', () => { document.body.style.cursor = 'none'; });
-document.addEventListener('touchmove', () => { document.body.style.cursor = 'none'; });
+// Kiosk builds hide the pointer entirely; desktop builds keep it for mouse use.
+if (window.airconApi.desktopMode) {
+  document.body.classList.add('desktop-mode');
+} else {
+  document.body.style.cursor = 'none';
+  document.addEventListener('mousemove', () => { document.body.style.cursor = 'none'; });
+  document.addEventListener('touchmove', () => { document.body.style.cursor = 'none'; });
+}

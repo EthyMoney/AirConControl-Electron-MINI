@@ -27,6 +27,22 @@ function getBooleanEnvironmentValue(name, fallback) {
   return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
 }
 
+// Desktop mode runs the app in a normal resizable window with a visible mouse cursor
+// instead of the frameless, cursor-hidden kiosk layout used on the touchscreen.
+function isDesktopModeEnabled() {
+  if (process.argv.includes('--desktop')) {
+    return true;
+  }
+  if (process.env.AIRCON_DESKTOP_MODE !== undefined) {
+    return getBooleanEnvironmentValue('AIRCON_DESKTOP_MODE', false);
+  }
+  // Baked in at package time by the desktop build scripts via electron-builder extraMetadata.
+  const packagedFlag = require('./package.json').airconDesktopMode;
+  return packagedFlag === true || packagedFlag === 'true';
+}
+
+const DESKTOP_MODE = isDesktopModeEnabled();
+
 const HOME_ASSISTANT_DISCOVERY_ENABLED = getBooleanEnvironmentValue('HOME_ASSISTANT_DISCOVERY_ENABLED', true);
 const HOME_ASSISTANT_DISCOVERY_PREFIX = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX || 'homeassistant';
 const HOME_ASSISTANT_STATUS_TOPIC = process.env.HOME_ASSISTANT_STATUS_TOPIC || 'homeassistant/status';
@@ -39,6 +55,7 @@ const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID || `${HOME_ASSISTANT_DEVICE_ID
 module.exports = {
   AIRCON_STALE_AFTER_MS,
   COMMAND_TIMEOUT_MS,
+  DESKTOP_MODE,
   DETAILED_HISTORY_RETENTION_DAYS,
   HOME_ASSISTANT_BASE_TOPIC,
   HOME_ASSISTANT_DEVICE_ID,

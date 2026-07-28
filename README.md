@@ -146,6 +146,18 @@ The native DSI display path is the default. For an older SPI display, use:
 DISPLAY_TYPE=spi sudo ./installer.sh
 ```
 
+### Windows desktop build
+
+The default build is a touchscreen kiosk: fullscreen, frameless, with the mouse cursor hidden. A desktop build runs the same app in a normal 800×480 window with a title bar, a visible cursor, and button hover feedback:
+
+```bash
+npm run start:desktop        # run it from source
+npm run dist:win:desktop     # build a Windows installer into dist-desktop/
+npm run package:win:desktop  # unpacked bundle only, into dist-desktop/win-unpacked/
+```
+
+Desktop mode is selected by the `--desktop` argument, the `AIRCON_DESKTOP_MODE` environment variable, or the `airconDesktopMode` flag that the two build scripts bake into the packaged app. The kiosk build is unaffected, and both share the same MQTT configuration and runtime history.
+
 ### Boot splash
 
 The Raspberry Pi installer enables the bundled **Shop Climate Control** Plymouth theme automatically. It includes an 800×480 cooling-themed splash and a lightweight three-dot startup animation designed for the Pi 3. The theme scales and center-crops safely if a different framebuffer size is detected.
@@ -170,6 +182,7 @@ npm run render:plymouth
 - `npm run lint` checks all JavaScript entry points for syntax errors.
 - `npm run package` builds an unpacked Electron bundle.
 - `npm run dist` creates installable artifacts with electron-builder.
+- `npm run dist:win:desktop` creates the windowed, mouse-friendly Windows build described above.
 
 ## License
 

@@ -810,3 +810,41 @@ body {
 .temperature-buttons button {
   cursor: none;
 }
+
+/*! Desktop Mode Styles */
+/* Applied by renderer.js when the app runs windowed for mouse use instead of as a
+   touchscreen kiosk. Restores the pointer and the hover feedback that is deliberately
+   disabled on touch (where a tapped button would stay stuck in its hover state). */
+
+body.desktop-mode,
+body.desktop-mode .temperature-history-svg,
+body.desktop-mode .runtime-hour-column {
+  cursor: default;
+}
+
+body.desktop-mode button:not(:disabled) {
+  cursor: pointer;
+}
+
+body.desktop-mode button:disabled {
+  cursor: not-allowed;
+}
+
+body.desktop-mode .temperature-buttons button:hover:not(:disabled) {
+  background-color: #444444;
+  color: #ffffff;
+}
+
+body.desktop-mode .control-buttons button:hover:not(:disabled) {
+  background-color: #444444;
+}
+
+body.desktop-mode .light-mode .temperature-buttons button:hover:not(:disabled) {
+  background-color: #cccccc;
+  color: #333333;
+}
+
+body.desktop-mode .light-mode .control-buttons button:hover:not(:disabled) {
+  background-color: #f2f2f2;
+  color: #333333;
+}

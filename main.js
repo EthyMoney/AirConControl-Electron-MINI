@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { windowIcon } = require('./config');
+const { DESKTOP_MODE, windowIcon } = require('./config');
 const { MqttController } = require('./mqtt-controller');
 
 let mainWindow = null;
@@ -20,18 +20,27 @@ function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const indexPath = path.join(__dirname, 'index.html');
   const allowedUrl = pathToFileURL(indexPath).toString();
+  // The UI is laid out for an 800x480 touchscreen, so the desktop window matches that
+  // content size rather than filling the display.
   mainWindow = new BrowserWindow({
-    width,
-    height,
+    width: DESKTOP_MODE ? Math.min(width, 800) : width,
+    height: DESKTOP_MODE ? Math.min(height, 480) : height,
+    minWidth: DESKTOP_MODE ? 640 : undefined,
+    minHeight: DESKTOP_MODE ? 400 : undefined,
+    useContentSize: DESKTOP_MODE,
+    center: DESKTOP_MODE,
+    title: 'AirConControl',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: DESKTOP_MODE ? ['--desktop'] : [],
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true
     },
     icon: windowIcon,
-    fullscreen: true,
-    frame: false
+    fullscreen: !DESKTOP_MODE,
+    frame: DESKTOP_MODE,
+    resizable: DESKTOP_MODE
   });
 
   mainWindow.setMenu(null);
@@ -72,7 +81,7 @@ app.whenReady().then(async () => {
   createWindow();
   mqttController.start();
 
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && !DESKTOP_MODE) {
     app.dock.hide();
   }
 }).catch((error) => {

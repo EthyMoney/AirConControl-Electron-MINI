@@ -10,7 +10,10 @@
     "lint": "node --check main.js && node --check renderer.js && node --check preload.js && node --check mqtt-controller.js && node --check home-assistant-bridge.js && node --check runtime-store.js && node --check config.js",
     "test": "node --test",
     "package": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "start:desktop": "electron . --desktop",
+    "package:win:desktop": "electron-builder --win --dir --config.extraMetadata.airconDesktopMode=true --config.directories.output=dist-desktop",
+    "dist:win:desktop": "electron-builder --win --config.extraMetadata.airconDesktopMode=true --config.directories.output=dist-desktop"
   },
   "devDependencies": {
     "electron": "^42.3.3",
