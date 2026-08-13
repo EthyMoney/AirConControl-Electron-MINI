@@ -16,11 +16,11 @@
     "dist:win:desktop": "electron-builder --win --config.extraMetadata.airconDesktopMode=true --config.directories.output=dist-desktop"
   },
   "devDependencies": {
-    "electron": "^42.3.3",
-    "electron-builder": "^26.15.2"
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "mqtt": "^5.15.1"
+    "mqtt": "^5.15.2"
   },
   "build": {
     "appId": "com.ethymoney.airconcontrol",
@@ -41,5 +41,8 @@
     "linux": {
       "category": "Utility"
     }
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true
   }
 }

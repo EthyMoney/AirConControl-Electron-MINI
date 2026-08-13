@@ -131,7 +131,15 @@ function formatAge(timestamp, now = Date.now()) {
     return `${minutes}m ago`;
   }
   const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m ago`;
+  if (hours < 24) {
+    return `${hours}h ${minutes % 60}m ago`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 7) {
+    return `${days}d ${hours % 24}h ago`;
+  }
+  const weeks = Math.floor(days / 7);
+  return `${weeks}w ${days % 7}d ago`;
 }
 
 function formatMillisecondsToDuration(milliseconds) {
@@ -140,12 +148,24 @@ function formatMillisecondsToDuration(milliseconds) {
     return `${totalSeconds}s`;
   }
   const totalMinutes = Math.floor(totalSeconds / 60);
-  const hours = Math.floor(totalMinutes / 60);
+  const totalHours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  if (hours === 0) {
+  if (totalHours === 0) {
     return `${totalMinutes}m`;
   }
-  return minutes === 0 ? `${hours}hr` : `${hours}hr ${minutes}m`;
+  if (totalHours < 24) {
+    return minutes === 0 ? `${totalHours}hr` : `${totalHours}hr ${minutes}m`;
+  }
+  // Past a day the exact minutes stop being useful, so roll up into the largest
+  // unit that fits and keep a single remainder for context.
+  const totalDays = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (totalDays < 7) {
+    return hours === 0 ? `${totalDays}d` : `${totalDays}d ${hours}hr`;
+  }
+  const weeks = Math.floor(totalDays / 7);
+  const days = totalDays % 7;
+  return days === 0 ? `${weeks}w` : `${weeks}w ${days}d`;
 }
 
 function getLiveRuntimeMs(reported, airconState) {
