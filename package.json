@@ -12,8 +12,8 @@
     "package": "electron-builder --dir",
     "dist": "electron-builder",
     "start:desktop": "electron . --desktop",
-    "package:win:desktop": "electron-builder --win --dir --config.extraMetadata.airconDesktopMode=true --config.directories.output=dist-desktop",
-    "dist:win:desktop": "electron-builder --win --config.extraMetadata.airconDesktopMode=true --config.directories.output=dist-desktop"
+    "package:win:desktop": "node scripts/build-desktop.js --dir",
+    "dist:win:desktop": "node scripts/build-desktop.js"
   },
   "devDependencies": {
     "electron": "^43.4.0",
