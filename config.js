@@ -4,7 +4,7 @@ const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://192.168.1.216';
 const MQTT_TOPIC_AIRCON = process.env.MQTT_TOPIC_AIRCON || 'home/shop/aircon';
 const MQTT_TOPIC_AIRCON_COMMAND = process.env.MQTT_TOPIC_AIRCON_COMMAND || MQTT_TOPIC_AIRCON;
 const MQTT_TOPIC_AIRCON_STATE = process.env.MQTT_TOPIC_AIRCON_STATE || MQTT_TOPIC_AIRCON;
-const MQTT_TOPIC_TEMPEST_STATS = process.env.MQTT_TOPIC_TEMPEST_STATS || 'homeassistant/sensor/weatherflow2mqtt_ST-00095605/observation/state';
+const MQTT_TOPIC_TEMPEST_STATS = process.env.MQTT_TOPIC_TEMPEST_STATS || 'homeassistant/sensor/weatherflow2mqtt_ST-00216747/observation/state';
 const MQTT_USERNAME = process.env.MQTT_USERNAME || null;
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD || null;
 
