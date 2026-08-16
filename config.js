@@ -73,9 +73,12 @@ const HOME_ASSISTANT_DEVICE_ID = process.env.HOME_ASSISTANT_DEVICE_ID || 'aircon
 const HOME_ASSISTANT_DEVICE_NAME = process.env.HOME_ASSISTANT_DEVICE_NAME || 'Shop Climate Control';
 const HOME_ASSISTANT_BASE_TOPIC = process.env.HOME_ASSISTANT_BASE_TOPIC || 'airconcontrol/shop';
 const HOME_ASSISTANT_STATE_INTERVAL_MS = getPositiveIntegerEnvironmentValue('HOME_ASSISTANT_STATE_INTERVAL_MS', 60000);
-// Brokers evict the older session when a second client connects with the same id, so a desktop
-// copy running alongside the wall display must not share its client id or the two would
-// disconnect each other in a loop.
+const HOME_ASSISTANT_LEASE_TOPIC = process.env.HOME_ASSISTANT_LEASE_TOPIC
+  || `${HOME_ASSISTANT_BASE_TOPIC}/bridge/owner`;
+const HOME_ASSISTANT_LEASE_DURATION_MS = getPositiveIntegerEnvironmentValue(
+  'HOME_ASSISTANT_LEASE_DURATION_MS',
+  30000
+);
 const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID
   || `${HOME_ASSISTANT_DEVICE_ID}_bridge${DESKTOP_MODE ? '_desktop' : ''}`;
 
@@ -95,6 +98,8 @@ module.exports = {
   HOME_ASSISTANT_DEVICE_NAME,
   HOME_ASSISTANT_DISCOVERY_ENABLED,
   HOME_ASSISTANT_DISCOVERY_PREFIX,
+  HOME_ASSISTANT_LEASE_DURATION_MS,
+  HOME_ASSISTANT_LEASE_TOPIC,
   HOME_ASSISTANT_STATUS_TOPIC,
   HOME_ASSISTANT_STATE_INTERVAL_MS,
   MQTT_BROKER_URL,

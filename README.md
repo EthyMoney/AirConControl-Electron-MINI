@@ -47,6 +47,13 @@ Home Assistant MQTT discovery is enabled by default. Point this app and Home Ass
 homeassistant/device/airconcontrol_shop/config
 ```
 
+Before enabling the bridge, each instance checks a retained ownership lease at
+`airconcontrol/shop/bridge/owner`. The first instance claims and refreshes the lease; instances
+on other computers that see a live lease keep their normal controls and telemetry but disable
+their Home Assistant bridge. A stopped owner clears its lease, while an abandoned lease expires
+after 30 seconds. MQTT client IDs include the hostname and process ID so these ordinary
+connections do not evict one another from the broker.
+
 The discovered **Shop Climate Control** device contains:
 
 | Entity | Purpose |
@@ -73,6 +80,8 @@ HOME_ASSISTANT_DEVICE_ID=airconcontrol_shop
 HOME_ASSISTANT_DEVICE_NAME=Shop Climate Control
 HOME_ASSISTANT_BASE_TOPIC=airconcontrol/shop
 HOME_ASSISTANT_STATE_INTERVAL_MS=60000
+HOME_ASSISTANT_LEASE_TOPIC=airconcontrol/shop/bridge/owner
+HOME_ASSISTANT_LEASE_DURATION_MS=30000
 ```
 
 `HOME_ASSISTANT_DEVICE_ID` is normalized to lowercase letters, numbers, underscores, and hyphens. Keep it stable: changing it creates a new Home Assistant device. If an old ID must be removed, publish an empty retained payload to its old discovery topic.
@@ -124,6 +133,8 @@ Available environment variables are listed in `.env.example`:
 - `HOME_ASSISTANT_DEVICE_NAME`
 - `HOME_ASSISTANT_BASE_TOPIC`
 - `HOME_ASSISTANT_STATE_INTERVAL_MS`
+- `HOME_ASSISTANT_LEASE_TOPIC`
+- `HOME_ASSISTANT_LEASE_DURATION_MS`
 
 Example:
 
@@ -165,7 +176,7 @@ Desktop mode is selected by the `--desktop` argument, the `AIRCON_DESKTOP_MODE` 
 A desktop copy is meant to run **alongside** the always-on wall display, so it defaults to staying out of the wall display's way:
 
 - **The Home Assistant bridge is off.** Discovery, state, and availability are retained topics with a single owner; two publishers would fight over them, and the desktop app closing would publish `offline` and knock the entity out. Set `HOME_ASSISTANT_DISCOVERY_ENABLED=1` to override this if you are running a desktop copy on its own.
-- **The MQTT client ID gets a `_desktop` suffix.** Brokers evict the older session when a second client connects with the same ID, so sharing one would make the two instances disconnect each other in a loop.
+- **The MQTT client ID gets a `_desktop` suffix plus a per-host/process suffix.** Brokers evict the older session when a second client connects with the same ID, so every running instance needs its own final ID.
 
 Both instances still read the same MQTT topics and can send commands. Climate history is per-machine: it is derived from what that instance observed, and lives in its own per-user data directory.
 
