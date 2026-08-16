@@ -47,12 +47,17 @@ Home Assistant MQTT discovery is enabled by default. Point this app and Home Ass
 homeassistant/device/airconcontrol_shop/config
 ```
 
-Before enabling the bridge, each instance checks a retained ownership lease at
-`airconcontrol/shop/bridge/owner`. The first instance claims and refreshes the lease; instances
-on other computers that see a live lease keep their normal controls and telemetry but disable
-their Home Assistant bridge. A stopped owner clears its lease, while an abandoned lease expires
-after 30 seconds. MQTT client IDs include the hostname and process ID so these ordinary
-connections do not evict one another from the broker.
+Every HA-capable instance continuously watches the retained MQTT 5 ownership lease at
+`airconcontrol/shop/bridge/owner`. One instance is elected leader and refreshes the lease;
+the others stay connected as standbys while retaining normal controls and telemetry. A cleanly
+stopped leader clears the lease for immediate takeover. If it crashes or loses the broker, its
+MQTT 5 message expiry removes the abandoned lease after 30 seconds and a standby automatically
+takes over. A leader-only MQTT Last Will marks the HA device offline during that gap. Losing
+ownership disables HA commands and publishing immediately.
+
+MQTT client IDs include the stable instance ID and process ID so ordinary connections cannot
+evict one another. Set a unique, stable `AIRCON_INSTANCE_ID` on every device; the hostname is
+used by default.
 
 The discovered **Shop Climate Control** device contains:
 
@@ -63,6 +68,9 @@ The discovered **Shop Climate Control** device contains:
 | Compressor | Diagnostic compressor state |
 | Cooling runtime today | Observed cooling duration for the local calendar day |
 | Last status | Timestamp of the latest validated device status |
+| Bridge instance | Stable ID of the elected bridge |
+| Bridge version | Running application version |
+| Runtime source | Instance that published shared climate history |
 
 Normalized state and availability are retained under `airconcontrol/shop`. Home Assistant commands use separate mode, power, and temperature command topics under that base topic, then pass through the same validation, broker acknowledgement, reported-state confirmation, and timeout handling as touchscreen commands. Commands are not retained and have a 30-second Home Assistant message-expiry interval.
 
@@ -94,6 +102,12 @@ Each reported day has two touchscreen views. **Temp** plots sampled current temp
 
 Temperature is sampled every five minutes by default and detailed temperature/cooling-interval history is retained for 90 days. These limits can be changed with `TEMPERATURE_HISTORY_SAMPLE_MS` and `DETAILED_HISTORY_RETENTION_DAYS`. Daily and hourly aggregate runtime is retained beyond the detailed-history window.
 
+The elected bridge publishes its complete report as a gzip-compressed retained MQTT payload at
+`airconcontrol/shop/runtime/report` every five minutes and whenever leadership changes. Standbys
+display that shared report, so all screens use one history source. Each instance still records a
+local copy for resilience; a newly elected leader publishes its local observations as the new
+shared source. The Climate History header identifies the active source.
+
 An unobserved interval is capped at `AIRCON_STALE_AFTER_MS`, then recorded as a coverage gap rather than guessed. Once that deadline passes the display keeps re-requesting a status every `AIRCON_STALE_RETRY_MS` until one arrives. Temperature lines break across long observation gaps. The report displays its generation time, local timezone, and gap count; durations under one minute display as seconds.
 
 Runtime state is atomically stored in Electron's per-user data directory as `cooling-runtime-report.json`, with a backup. The file is written whole on every save, so saves are coalesced into a `RUNTIME_SAVE_INTERVAL_MS` window (30s) rather than issued per status message — this matters on a Pi, where the store approaches 1 MB at full retention and the SD card pays for every rewrite. Cooling transitions decide how runtime is attributed and are flushed within `RUNTIME_CRITICAL_SAVE_MS` instead of waiting out that window, and the `.bak` recovery point is refreshed on its own `RUNTIME_BACKUP_INTERVAL_MS` cadence (1h) so a routine save does not write the data twice. A crash can therefore lose at most one save window of the open interval. Writes are `fsync`ed before the atomic rename. Existing `cooling-runtime-daily.json` and `cooling-runtime-hourly.json` files are imported automatically the first time the new store is created. Corrupt stores are preserved before recovery.
@@ -113,6 +127,10 @@ Available environment variables are listed in `.env.example`:
 - `MQTT_CLIENT_ID`
 - `MQTT_USERNAME`
 - `MQTT_PASSWORD`
+- `MQTT_CA_FILE`
+- `MQTT_CERT_FILE`
+- `MQTT_KEY_FILE`
+- `MQTT_TLS_REJECT_UNAUTHORIZED`
 - `MQTT_TOPIC_AIRCON` (legacy fallback for both topics)
 - `MQTT_TOPIC_AIRCON_COMMAND`
 - `MQTT_TOPIC_AIRCON_STATE`
@@ -126,6 +144,11 @@ Available environment variables are listed in `.env.example`:
 - `RUNTIME_SAVE_INTERVAL_MS`
 - `RUNTIME_CRITICAL_SAVE_MS`
 - `RUNTIME_BACKUP_INTERVAL_MS`
+- `AIRCON_INSTANCE_ID`
+- `AIRCON_FLEET_TOPIC`
+- `AIRCON_FLEET_STATUS_INTERVAL_MS`
+- `SHARED_RUNTIME_TOPIC`
+- `SHARED_RUNTIME_INTERVAL_MS`
 - `HOME_ASSISTANT_DISCOVERY_ENABLED`
 - `HOME_ASSISTANT_DISCOVERY_PREFIX`
 - `HOME_ASSISTANT_STATUS_TOPIC`
@@ -145,6 +168,21 @@ MQTT_TOPIC_AIRCON_STATE=home/shop/aircon/state \
 npm start
 ```
 
+For TLS, use an `mqtts://` broker URL and point `MQTT_CA_FILE` at the CA certificate. Set
+`MQTT_CERT_FILE` and `MQTT_KEY_FILE` as well when the broker requires mutual TLS. Certificate
+validation defaults to enabled; `MQTT_TLS_REJECT_UNAUTHORIZED=false` is only suitable for a
+temporary test with a self-signed broker.
+
+Every instance retains its hostname, app version, MQTT status, HA role, and runtime source at
+`airconcontrol/shop/instances/<instance-id>/status`. Its MQTT Last Will changes that record to
+`offline`. These records make outdated or disconnected devices visible with any MQTT client.
+
+Recommended broker permissions for the app account are read access to air-conditioner state,
+weather state, HA birth/command topics, the lease, shared runtime, and fleet topics; write access
+to air-conditioner commands, HA discovery/state/availability, the lease, shared runtime, and its
+fleet status. Deny unrelated topics. Prefer a distinct credential per device even when their ACLs
+are identical, and do not place credentials in the repository.
+
 Electron sandboxing is enabled by default. On a system that cannot provide either the Chromium SUID sandbox or unprivileged user namespaces, fix the host sandbox configuration where possible. A temporary diagnostic launch can use `npm start -- --no-sandbox`, but that weakens renderer isolation.
 
 ### Raspberry Pi kiosk
@@ -154,6 +192,11 @@ The installer handles the system packages, Node.js, repository checkout, depende
 ```bash
 sudo ./installer.sh
 ```
+
+On first installation it creates `~/.config/aircon-control.env` from `.env.example`, restricts it
+to the kiosk user (`0600`), and loads it before each app start. Configure each Pi's unique
+`AIRCON_INSTANCE_ID`, broker credentials, and TLS certificate paths there. Updates preserve this
+file.
 
 The native DSI display path is the default. For an older SPI display, use:
 
@@ -178,7 +221,19 @@ A desktop copy is meant to run **alongside** the always-on wall display, so it d
 - **The Home Assistant bridge is off.** Discovery, state, and availability are retained topics with a single owner; two publishers would fight over them, and the desktop app closing would publish `offline` and knock the entity out. Set `HOME_ASSISTANT_DISCOVERY_ENABLED=1` to override this if you are running a desktop copy on its own.
 - **The MQTT client ID gets a `_desktop` suffix plus a per-host/process suffix.** Brokers evict the older session when a second client connects with the same ID, so every running instance needs its own final ID.
 
-Both instances still read the same MQTT topics and can send commands. Climate history is per-machine: it is derived from what that instance observed, and lives in its own per-user data directory.
+Both instances still read the same MQTT topics and can send commands. Their local history remains
+in each per-user data directory, while the elected bridge supplies the shared report shown across
+the fleet.
+
+### Fleet rollout and failover check
+
+1. Stop or disable HA bridging on every old version; old builds do not honor the lease.
+2. Deploy this version to all devices and assign each a distinct `AIRCON_INSTANCE_ID`.
+3. Start one device, then the rest. Confirm exactly one retained lease and one `leader` status.
+4. Stop the leader. A standby should become leader immediately after a clean stop, or within the
+  configured lease duration after a crash.
+5. Confirm Home Assistant's Bridge instance/version sensors change to the new owner and every
+  fleet status reports the expected app version.
 
 ### Boot splash
 

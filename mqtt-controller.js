@@ -1,8 +1,13 @@
 const { EventEmitter } = require('events');
 const mqtt = require('mqtt');
+const { gzipSync, gunzipSync } = require('zlib');
+const packageMetadata = require('./package.json');
 const { HomeAssistantBridge } = require('./home-assistant-bridge');
 const { RuntimeStore } = require('./runtime-store');
 const {
+  AIRCON_FLEET_STATUS_INTERVAL_MS,
+  AIRCON_FLEET_TOPIC,
+  AIRCON_INSTANCE_ID,
   AIRCON_STALE_AFTER_MS,
   AIRCON_STALE_RETRY_MS,
   COMMAND_TIMEOUT_MS,
@@ -21,11 +26,14 @@ const {
   HOME_ASSISTANT_STATE_INTERVAL_MS,
   MQTT_BROKER_URL,
   MQTT_CLIENT_ID,
+  MQTT_CONNECT_OPTIONS,
   MQTT_PASSWORD,
   MQTT_TOPIC_AIRCON_COMMAND,
   MQTT_TOPIC_AIRCON_STATE,
   MQTT_TOPIC_TEMPEST_STATS,
   MQTT_USERNAME,
+  SHARED_RUNTIME_INTERVAL_MS,
+  SHARED_RUNTIME_TOPIC,
   TEMPERATURE_HISTORY_SAMPLE_MS,
   WEATHER_STALE_AFTER_MS
 } = require('./config');
@@ -293,7 +301,7 @@ function commandMatchesReported(command, reported) {
   return reported.enabled === null ? reported.task === 'off' : reported.enabled === false;
 }
 
-function createInitialState(now, homeAssistantBridge) {
+function createInitialState(now, homeAssistantBridge, homeAssistantConfigured, metadata) {
   return {
     revision: 0,
     updatedAt: now,
@@ -302,9 +310,21 @@ function createInitialState(now, homeAssistantBridge) {
     weather: { reported: null, receivedAt: null, freshness: 'unknown', freshnessChangedAt: now, error: null },
     command: null,
     storage: { status: 'ready', error: null },
+    system: {
+      instanceId: metadata.instanceId,
+      hostname: metadata.hostname,
+      version: metadata.version,
+      startedAt: metadata.startedAt,
+      fleetTopic: metadata.fleetTopic,
+      secureMqtt: metadata.secureMqtt
+    },
+    runtimeSync: { status: 'local', sourceInstanceId: metadata.instanceId, receivedAt: null, error: null },
     homeAssistant: {
       enabled: homeAssistantBridge.enabled,
       status: homeAssistantBridge.enabled ? 'disconnected' : 'disabled',
+      role: homeAssistantBridge.enabled ? 'leader' : (homeAssistantConfigured ? 'starting' : 'disabled'),
+      ownerInstanceId: null,
+      leaseExpiresAt: null,
       discoveryTopic: homeAssistantBridge.enabled ? homeAssistantBridge.topics.discovery : null,
       baseTopic: homeAssistantBridge.enabled ? homeAssistantBridge.baseTopic : null,
       error: null
@@ -321,6 +341,16 @@ class MqttController extends EventEmitter {
     this.mqttClientId = options.mqttClientId || MQTT_CLIENT_ID;
     this.mqttUsername = options.mqttUsername ?? MQTT_USERNAME;
     this.mqttPassword = options.mqttPassword ?? MQTT_PASSWORD;
+    this.mqttConnectOptions = options.mqttConnectOptions || MQTT_CONNECT_OPTIONS;
+    this.instanceId = options.instanceId || AIRCON_INSTANCE_ID;
+    this.hostname = options.hostname || this.instanceId;
+    this.version = options.version || packageMetadata.version;
+    this.startedAt = this.now();
+    this.fleetBaseTopic = options.fleetBaseTopic || AIRCON_FLEET_TOPIC;
+    this.fleetStatusTopic = `${this.fleetBaseTopic}/${this.instanceId}/status`;
+    this.fleetStatusIntervalMs = options.fleetStatusIntervalMs || AIRCON_FLEET_STATUS_INTERVAL_MS;
+    this.sharedRuntimeTopic = options.sharedRuntimeTopic || SHARED_RUNTIME_TOPIC;
+    this.sharedRuntimeIntervalMs = options.sharedRuntimeIntervalMs || SHARED_RUNTIME_INTERVAL_MS;
     this.commandTopic = options.commandTopic || MQTT_TOPIC_AIRCON_COMMAND;
     this.stateTopic = options.stateTopic || MQTT_TOPIC_AIRCON_STATE;
     this.weatherTopic = options.weatherTopic || MQTT_TOPIC_TEMPEST_STATS;
@@ -341,8 +371,11 @@ class MqttController extends EventEmitter {
       backupIntervalMs: options.runtimeBackupIntervalMs || RUNTIME_BACKUP_INTERVAL_MS,
       now: this.now
     });
+    this.homeAssistantConfigured = options.homeAssistantConfigured
+      ?? (options.homeAssistantBridge === null ? false : HOME_ASSISTANT_DISCOVERY_ENABLED);
     this.homeAssistantBridge = options.homeAssistantBridge || new HomeAssistantBridge({
-      enabled: options.homeAssistantBridge === null ? false : HOME_ASSISTANT_DISCOVERY_ENABLED,
+      enabled: options.homeAssistantEnabled
+        ?? (options.homeAssistantBridge === null ? false : HOME_ASSISTANT_DISCOVERY_ENABLED),
       discoveryPrefix: HOME_ASSISTANT_DISCOVERY_PREFIX,
       statusTopic: HOME_ASSISTANT_STATUS_TOPIC,
       deviceId: HOME_ASSISTANT_DEVICE_ID,
@@ -358,10 +391,26 @@ class MqttController extends EventEmitter {
     this.homeAssistantHeartbeat = null;
     this.homeAssistantRetryTimer = null;
     this.homeAssistantPublishChain = Promise.resolve();
+    this.homeAssistantTransition = Promise.resolve();
+    this.homeAssistantTransitionRequestId = 0;
     this.homeAssistantSetupPromise = null;
     this.homeAssistantReady = false;
+    this.homeAssistantGeneration = this.homeAssistantBridge.enabled ? 1 : 0;
+    this.homeAssistantLeaseOwnerId = options.homeAssistantLeaseOwnerId
+      || (this.homeAssistantBridge.enabled ? `static:${this.instanceId}` : null);
+    this.fleetStatusTimer = null;
+    this.sharedRuntimeTimer = null;
+    this.sharedRuntimeReport = null;
+    this.sharedRuntimeSequence = 0;
     this.nextCommandId = 1;
-    this.state = createInitialState(this.now(), this.homeAssistantBridge);
+    this.state = createInitialState(this.now(), this.homeAssistantBridge, this.homeAssistantConfigured, {
+      instanceId: this.instanceId,
+      hostname: this.hostname,
+      version: this.version,
+      startedAt: this.startedAt,
+      fleetTopic: this.fleetStatusTopic,
+      secureMqtt: this.brokerUrl.startsWith('mqtts://') || this.brokerUrl.startsWith('wss://')
+    });
 
     this.runtimeStore.on('warning', (message) => this.setStorageState('warning', message));
     this.runtimeStore.on('error', (error) => this.setStorageState('error', error.message));
@@ -429,19 +478,22 @@ class MqttController extends EventEmitter {
 
     this.setMqttState('connecting');
     const connectOptions = {
+      ...this.mqttConnectOptions,
       reconnectPeriod: 5000,
       clean: true,
-      clientId: this.mqttClientId
+      clientId: this.mqttClientId,
+      will: {
+        topic: this.fleetStatusTopic,
+        payload: JSON.stringify(this.buildFleetStatus('offline')),
+        qos: 1,
+        retain: true
+      }
     };
     if (this.mqttUsername) {
       connectOptions.username = this.mqttUsername;
     }
     if (this.mqttPassword) {
       connectOptions.password = this.mqttPassword;
-    }
-    const will = this.homeAssistantBridge.getWill();
-    if (will) {
-      connectOptions.will = will;
     }
     this.client = this.mqttLibrary.connect(this.brokerUrl, connectOptions);
 
@@ -450,6 +502,7 @@ class MqttController extends EventEmitter {
       const topics = [...new Set([
         this.stateTopic,
         this.weatherTopic,
+        this.sharedRuntimeTopic,
         ...this.homeAssistantBridge.getSubscriptions()
       ])];
       this.client.subscribe(topics, { qos: 1 }, (error) => {
@@ -464,6 +517,8 @@ class MqttController extends EventEmitter {
         if (!this.state.weather.receivedAt) {
           this.resetFreshnessTimer('weather');
         }
+        this.publishFleetStatus();
+        this.publishSharedRuntimeReport();
         this.publishHomeAssistantSetup().catch((publishError) => {
           this.setHomeAssistantError(publishError.message);
         });
@@ -473,14 +528,277 @@ class MqttController extends EventEmitter {
     this.client.on('offline', () => this.setMqttState('offline'));
     this.client.on('close', () => this.setMqttState('closed'));
     this.client.on('error', (error) => this.setMqttState('error', error.message));
-    this.client.on('message', (topic, messageBuffer) => this.handleMessage(topic, messageBuffer.toString()));
-    if (this.homeAssistantBridge.enabled) {
-      this.homeAssistantHeartbeat = setInterval(
-        () => this.scheduleHomeAssistantStatePublish(),
-        this.homeAssistantStateIntervalMs
-      );
-      this.homeAssistantHeartbeat.unref?.();
+    this.client.on('message', (topic, messageBuffer) => {
+      if (topic === this.sharedRuntimeTopic) {
+        this.handleSharedRuntimeMessage(messageBuffer);
+      } else {
+        this.handleMessage(topic, messageBuffer.toString());
+      }
+    });
+    this.updateHomeAssistantHeartbeat();
+    this.updateFleetStatusHeartbeat();
+    this.updateSharedRuntimePublishing();
+  }
+
+  buildFleetStatus(status = 'online') {
+    return {
+      status,
+      instance_id: this.instanceId,
+      hostname: this.hostname,
+      version: this.version,
+      started_at: new Date(this.startedAt).toISOString(),
+      updated_at: new Date(this.now()).toISOString(),
+      mqtt_status: status === 'online' ? this.state.mqtt.status : status,
+      home_assistant_role: this.state.homeAssistant.role,
+      home_assistant_status: this.state.homeAssistant.status,
+      runtime_source: this.state.runtimeSync.sourceInstanceId
+    };
+  }
+
+  publishFleetStatus(status = 'online') {
+    return this.publishTopic(
+      this.fleetStatusTopic,
+      JSON.stringify(this.buildFleetStatus(status)),
+      { qos: 1, retain: true }
+    );
+  }
+
+  updateFleetStatusHeartbeat() {
+    if (this.fleetStatusTimer) clearInterval(this.fleetStatusTimer);
+    this.fleetStatusTimer = setInterval(() => this.publishFleetStatus(), this.fleetStatusIntervalMs);
+    this.fleetStatusTimer.unref?.();
+  }
+
+  updateSharedRuntimePublishing() {
+    if (this.sharedRuntimeTimer) clearInterval(this.sharedRuntimeTimer);
+    this.sharedRuntimeTimer = null;
+    if (!this.homeAssistantBridge.enabled) return;
+    this.sharedRuntimeTimer = setInterval(
+      () => this.publishSharedRuntimeReport(),
+      this.sharedRuntimeIntervalMs
+    );
+    this.sharedRuntimeTimer.unref?.();
+  }
+
+  publishSharedRuntimeReport() {
+    if (
+      !this.homeAssistantBridge.enabled
+      || !this.homeAssistantLeaseOwnerId
+      || !this.client?.connected
+    ) return Promise.resolve(false);
+    this.sharedRuntimeSequence += 1;
+    const payload = gzipSync(JSON.stringify({
+      instanceId: this.instanceId,
+      version: this.version,
+      leaseOwnerId: this.homeAssistantLeaseOwnerId,
+      sequence: this.sharedRuntimeSequence,
+      publishedAt: this.now(),
+      report: this.runtimeStore.getReport()
+    }));
+    return this.publishTopic(this.sharedRuntimeTopic, payload, { qos: 1, retain: true });
+  }
+
+  handleSharedRuntimeMessage(messageBuffer) {
+    try {
+      const payload = JSON.parse(gunzipSync(messageBuffer, { maxOutputLength: 8 * 1024 * 1024 }).toString());
+      if (
+        typeof payload.instanceId !== 'string'
+        || typeof payload.leaseOwnerId !== 'string'
+        || !Number.isFinite(payload.sequence)
+        || !Number.isFinite(payload.publishedAt)
+        || !isRecord(payload.report)
+        || !Number.isFinite(payload.report.generatedAt)
+        || !isRecord(payload.report.daily)
+        || !isRecord(payload.report.hourly)
+        || !Array.isArray(payload.report.gaps)
+      ) {
+        throw new Error('Shared runtime payload is missing report metadata');
+      }
+      if (this.homeAssistantLeaseOwnerId && payload.leaseOwnerId !== this.homeAssistantLeaseOwnerId) {
+        return;
+      }
+      if (
+        this.sharedRuntimeReport?.leaseOwnerId === payload.leaseOwnerId
+        && this.sharedRuntimeReport.sequence >= payload.sequence
+      ) {
+        return;
+      }
+      this.sharedRuntimeReport = payload;
+      this.state.runtimeSync = {
+        status: this.homeAssistantLeaseOwnerId
+          ? (payload.instanceId === this.instanceId ? 'publishing' : 'shared')
+          : 'unverified',
+        sourceInstanceId: payload.instanceId,
+        receivedAt: this.now(),
+        error: null
+      };
+      this.emitState({ publishHomeAssistant: false });
+    } catch (error) {
+      this.state.runtimeSync.error = `Invalid shared runtime report: ${error.message}`;
+      this.emitState({ publishHomeAssistant: false });
     }
+  }
+
+  updateHomeAssistantHeartbeat() {
+    if (this.homeAssistantHeartbeat) clearInterval(this.homeAssistantHeartbeat);
+    this.homeAssistantHeartbeat = null;
+    if (!this.homeAssistantBridge.enabled) return;
+    this.homeAssistantHeartbeat = setInterval(
+      () => this.scheduleHomeAssistantStatePublish(),
+      this.homeAssistantStateIntervalMs
+    );
+    this.homeAssistantHeartbeat.unref?.();
+  }
+
+  setHomeAssistantLeaseState(leaseState) {
+    this.homeAssistantLeaseOwnerId = leaseState.ownerId || null;
+    this.state.homeAssistant.role = leaseState.role;
+    this.state.homeAssistant.ownerInstanceId = leaseState.ownerInstanceId || null;
+    this.state.homeAssistant.leaseExpiresAt = leaseState.expiresAt || null;
+    if (!this.homeAssistantBridge.enabled) {
+      if (leaseState.role === 'standby') this.state.homeAssistant.status = 'standby';
+      else if (leaseState.role === 'waiting-for-mqtt') this.state.homeAssistant.status = 'waiting-for-mqtt';
+      else if (['starting', 'observing', 'claiming', 'reconnecting'].includes(leaseState.role)) {
+        this.state.homeAssistant.status = 'electing';
+      } else if (['error', 'disconnected'].includes(leaseState.role)) {
+        this.state.homeAssistant.status = 'lease-error';
+      }
+    }
+    this.state.homeAssistant.error = leaseState.error || null;
+    if (this.sharedRuntimeReport && this.homeAssistantLeaseOwnerId) {
+      if (this.sharedRuntimeReport.leaseOwnerId !== this.homeAssistantLeaseOwnerId) {
+        this.sharedRuntimeReport = null;
+        this.state.runtimeSync = {
+          status: 'local',
+          sourceInstanceId: this.instanceId,
+          receivedAt: null,
+          error: null
+        };
+      } else {
+        this.state.runtimeSync.status = this.sharedRuntimeReport.instanceId === this.instanceId
+          ? 'publishing'
+          : 'shared';
+      }
+    }
+    this.emitState({ publishHomeAssistant: false });
+    this.publishFleetStatus();
+  }
+
+  setHomeAssistantEnabled(enabled) {
+    const nextEnabled = Boolean(enabled);
+    this.homeAssistantTransitionRequestId += 1;
+    const requestId = this.homeAssistantTransitionRequestId;
+    if (!nextEnabled && this.homeAssistantBridge.enabled) {
+      this.homeAssistantGeneration += 1;
+      this.homeAssistantBridge.enabled = false;
+      this.homeAssistantReady = false;
+      if (this.homeAssistantPublishTimer) clearTimeout(this.homeAssistantPublishTimer);
+      this.homeAssistantPublishTimer = null;
+      if (this.homeAssistantRetryTimer) clearTimeout(this.homeAssistantRetryTimer);
+      this.homeAssistantRetryTimer = null;
+      this.updateHomeAssistantHeartbeat();
+      this.updateSharedRuntimePublishing();
+    }
+    const transition = this.homeAssistantTransition
+      .catch(() => {})
+      .then(() => {
+        if (requestId !== this.homeAssistantTransitionRequestId) return undefined;
+        return this.applyHomeAssistantEnabled(nextEnabled);
+      });
+    this.homeAssistantTransition = transition.catch(() => {});
+    return transition;
+  }
+
+  async applyHomeAssistantEnabled(enabled) {
+    if (enabled && this.homeAssistantBridge.enabled) return;
+    if (!enabled && !this.state.homeAssistant.enabled) return;
+    if (enabled) {
+      this.homeAssistantGeneration += 1;
+      this.homeAssistantBridge.enabled = true;
+      this.state.homeAssistant.enabled = true;
+      this.state.homeAssistant.role = 'leader';
+      this.state.homeAssistant.status = this.client?.connected ? 'publishing' : 'disconnected';
+      this.state.homeAssistant.discoveryTopic = this.homeAssistantBridge.topics.discovery;
+      this.state.homeAssistant.baseTopic = this.homeAssistantBridge.baseTopic;
+      this.state.homeAssistant.error = null;
+      this.updateHomeAssistantHeartbeat();
+      this.updateSharedRuntimePublishing();
+      this.emitState({ publishHomeAssistant: false });
+      const homeAssistantSubscriptions = this.homeAssistantBridge.getSubscriptions();
+      try {
+        if (this.client?.connected) {
+          await new Promise((resolve, reject) => {
+            this.client.subscribe(homeAssistantSubscriptions, { qos: 1 }, (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          await this.publishHomeAssistantSetup();
+          await this.publishSharedRuntimeReport();
+        }
+      } catch (error) {
+        await this.rollbackHomeAssistantEnable(error, homeAssistantSubscriptions);
+        throw error;
+      }
+      return;
+    }
+
+    const homeAssistantSubscriptions = this.homeAssistantBridge.getSubscriptions({ includeDisabled: true });
+    if (this.homeAssistantBridge.enabled) this.homeAssistantGeneration += 1;
+    this.homeAssistantBridge.enabled = false;
+    this.homeAssistantReady = false;
+    this.updateHomeAssistantHeartbeat();
+    this.updateSharedRuntimePublishing();
+    if (this.homeAssistantPublishTimer) clearTimeout(this.homeAssistantPublishTimer);
+    this.homeAssistantPublishTimer = null;
+    if (this.homeAssistantRetryTimer) clearTimeout(this.homeAssistantRetryTimer);
+    this.homeAssistantRetryTimer = null;
+    if (this.homeAssistantSetupPromise) {
+      await this.homeAssistantSetupPromise.catch(() => {});
+    }
+    await this.homeAssistantPublishChain.catch(() => {});
+    if (this.client?.connected) {
+      await this.publishTopic(
+        this.homeAssistantBridge.topics.availability,
+        'offline',
+        { qos: 1, retain: true }
+      );
+      this.client.unsubscribe?.(homeAssistantSubscriptions, () => {});
+    }
+    this.state.homeAssistant.enabled = false;
+    this.state.homeAssistant.status = ['standby', 'waiting-for-mqtt'].includes(this.state.homeAssistant.role)
+      ? this.state.homeAssistant.role
+      : 'disabled';
+    this.state.homeAssistant.discoveryTopic = null;
+    this.state.homeAssistant.baseTopic = null;
+    this.emitState({ publishHomeAssistant: false });
+  }
+
+  async rollbackHomeAssistantEnable(error, homeAssistantSubscriptions) {
+    this.homeAssistantGeneration += 1;
+    this.homeAssistantBridge.enabled = false;
+    this.homeAssistantReady = false;
+    this.updateHomeAssistantHeartbeat();
+    this.updateSharedRuntimePublishing();
+    if (this.homeAssistantPublishTimer) clearTimeout(this.homeAssistantPublishTimer);
+    this.homeAssistantPublishTimer = null;
+    if (this.homeAssistantRetryTimer) clearTimeout(this.homeAssistantRetryTimer);
+    this.homeAssistantRetryTimer = null;
+    await this.homeAssistantPublishChain.catch(() => {});
+    if (this.client?.connected) {
+      await this.publishTopic(
+        this.homeAssistantBridge.topics.availability,
+        'offline',
+        { qos: 1, retain: true }
+      );
+      this.client.unsubscribe?.(homeAssistantSubscriptions, () => {});
+    }
+    this.state.homeAssistant.enabled = false;
+    this.state.homeAssistant.status = 'error';
+    this.state.homeAssistant.error = error.message;
+    this.state.homeAssistant.discoveryTopic = null;
+    this.state.homeAssistant.baseTopic = null;
+    this.emitState({ publishHomeAssistant: false });
   }
 
   handleMessage(topic, message) {
@@ -708,7 +1026,24 @@ class MqttController extends EventEmitter {
   }
 
   getRuntimeReport() {
-    return this.runtimeStore.getReport();
+    if (
+      !this.homeAssistantBridge.enabled
+      && this.sharedRuntimeReport?.report
+      && this.sharedRuntimeReport.leaseOwnerId === this.homeAssistantLeaseOwnerId
+    ) {
+      return {
+        ...clone(this.sharedRuntimeReport.report),
+        shared: true,
+        sourceInstanceId: this.sharedRuntimeReport.instanceId,
+        publishedAt: this.sharedRuntimeReport.publishedAt
+      };
+    }
+    return {
+      ...this.runtimeStore.getReport(),
+      shared: false,
+      sourceInstanceId: this.instanceId,
+      publishedAt: this.now()
+    };
   }
 
   setHomeAssistantError(message) {
@@ -734,14 +1069,22 @@ class MqttController extends EventEmitter {
     if (this.homeAssistantSetupPromise) {
       return this.homeAssistantSetupPromise;
     }
-    this.homeAssistantSetupPromise = this.performHomeAssistantSetup()
+    const generation = this.homeAssistantGeneration;
+    const setupPromise = this.performHomeAssistantSetup(generation)
       .finally(() => {
-        this.homeAssistantSetupPromise = null;
+        if (this.homeAssistantSetupPromise === setupPromise) {
+          this.homeAssistantSetupPromise = null;
+        }
       });
-    return this.homeAssistantSetupPromise;
+    this.homeAssistantSetupPromise = setupPromise;
+    return setupPromise;
   }
 
-  async performHomeAssistantSetup() {
+  isHomeAssistantGenerationActive(generation) {
+    return this.homeAssistantBridge.enabled && generation === this.homeAssistantGeneration;
+  }
+
+  async performHomeAssistantSetup(generation) {
     if (this.homeAssistantRetryTimer) {
       clearTimeout(this.homeAssistantRetryTimer);
       this.homeAssistantRetryTimer = null;
@@ -757,6 +1100,9 @@ class MqttController extends EventEmitter {
       JSON.stringify(this.homeAssistantBridge.buildDiscoveryPayload()),
       { qos: 1, retain: true }
     );
+    if (!this.isHomeAssistantGenerationActive(generation)) {
+      return false;
+    }
     if (!published) {
       throw new Error('Failed to publish Home Assistant discovery');
     }
@@ -765,7 +1111,8 @@ class MqttController extends EventEmitter {
     this.state.homeAssistant.status = 'online';
     this.state.homeAssistant.error = null;
     this.emitState({ publishHomeAssistant: false });
-    await this.publishHomeAssistantState();
+    await this.publishHomeAssistantState(generation);
+    return true;
   }
 
   scheduleHomeAssistantStatePublish() {
@@ -774,16 +1121,25 @@ class MqttController extends EventEmitter {
     }
     this.homeAssistantPublishTimer = setTimeout(() => {
       this.homeAssistantPublishTimer = null;
+      const generation = this.homeAssistantGeneration;
       this.homeAssistantPublishChain = this.homeAssistantPublishChain
-        .then(() => this.publishHomeAssistantState())
-        .catch((error) => this.setHomeAssistantError(error.message));
+        .then(() => this.publishHomeAssistantState(generation))
+        .catch((error) => {
+          if (this.isHomeAssistantGenerationActive(generation)) {
+            this.setHomeAssistantError(error.message);
+          }
+        });
     }, 10);
     this.homeAssistantPublishTimer.unref?.();
   }
 
-  async publishHomeAssistantState() {
-    if (!this.homeAssistantReady || !this.client?.connected) {
-      return;
+  async publishHomeAssistantState(generation = this.homeAssistantGeneration) {
+    if (
+      !this.homeAssistantReady
+      || !this.client?.connected
+      || !this.isHomeAssistantGenerationActive(generation)
+    ) {
+      return false;
     }
     const snapshot = this.getSnapshot();
     const now = this.now();
@@ -797,11 +1153,17 @@ class MqttController extends EventEmitter {
       JSON.stringify(statePayload),
       { qos: 1, retain: true }
     );
+    if (!this.isHomeAssistantGenerationActive(generation)) {
+      return false;
+    }
     const availabilityPublished = await this.publishTopic(
       this.homeAssistantBridge.topics.availability,
       statePayload.available ? 'online' : 'offline',
       { qos: 1, retain: true }
     );
+    if (!this.isHomeAssistantGenerationActive(generation)) {
+      return false;
+    }
     if (!statePublished || !availabilityPublished) {
       throw new Error('Failed to publish Home Assistant state');
     }
@@ -810,6 +1172,7 @@ class MqttController extends EventEmitter {
       this.state.homeAssistant.error = null;
       this.emitState({ publishHomeAssistant: false });
     }
+      return true;
   }
 
   handleHomeAssistantMessage(message, topic, rawPayload) {
@@ -877,6 +1240,14 @@ class MqttController extends EventEmitter {
       clearInterval(this.homeAssistantHeartbeat);
       this.homeAssistantHeartbeat = null;
     }
+    if (this.fleetStatusTimer) {
+      clearInterval(this.fleetStatusTimer);
+      this.fleetStatusTimer = null;
+    }
+    if (this.sharedRuntimeTimer) {
+      clearInterval(this.sharedRuntimeTimer);
+      this.sharedRuntimeTimer = null;
+    }
     if (this.homeAssistantRetryTimer) {
       clearTimeout(this.homeAssistantRetryTimer);
       this.homeAssistantRetryTimer = null;
@@ -893,8 +1264,11 @@ class MqttController extends EventEmitter {
       );
     }
     this.homeAssistantReady = false;
+    if (this.client?.connected) {
+      await this.publishFleetStatus('offline');
+    }
     if (this.client) {
-      this.client.end(true);
+      await new Promise((resolve) => this.client.end(false, {}, resolve));
       this.client = null;
     }
     await this.runtimeStore.flush();

@@ -52,13 +52,20 @@ class FakeMqttClient extends EventEmitter {
     callback(null);
   }
 
+  unsubscribe(topics, callback) {
+    this.unsubscribed = topics;
+    callback(null);
+  }
+
   publish(topic, message, options, callback) {
     this.published.push({ topic, message, options });
     callback(null);
   }
 
-  end() {
+  end(force, _options, callback) {
+    this.endForce = force;
     this.connected = false;
+    callback?.();
   }
 }
 
@@ -89,6 +96,8 @@ test('builds current Home Assistant device discovery for a non-optimistic climat
   assert.equal(discovery.components.climate.mode_state_template, '{{ value_json.mode }}');
   assert.equal(discovery.components.fan.platform, 'binary_sensor');
   assert.equal(discovery.components.cooling_runtime_today.device_class, 'duration');
+  assert.equal(discovery.components.bridge_version.entity_category, 'diagnostic');
+  assert.equal(discovery.components.runtime_source.value_template, '{{ value_json.runtime_source }}');
 });
 
 test('normalizes bridge identifiers, topics, modes, and commands', () => {
@@ -135,6 +144,7 @@ test('builds retained normalized state and availability from the canonical snaps
   assert.equal(state.temperature, 72);
   assert.equal(state.cooling_runtime_today_seconds, 125);
   assert.equal(state.command.source, 'home-assistant');
+  assert.equal(state.bridge_version, '1.1.0');
 });
 
 test('controller publishes discovery/state and routes Home Assistant commands', async () => {
@@ -163,8 +173,8 @@ test('controller publishes discovery/state and routes Home Assistant commands', 
 
   await controller.initialize();
   controller.start();
-  assert.equal(connectOptions.will.topic, bridge.topics.availability);
-  assert.equal(connectOptions.will.payload, 'offline');
+  assert.match(connectOptions.will.topic, /instances\/.+\/status/);
+  assert.equal(JSON.parse(connectOptions.will.payload).status, 'offline');
   assert.equal(connectOptions.clientId, 'test_aircon_bridge');
   assert.equal(connectOptions.username, 'bridge-user');
   assert.equal(connectOptions.password, 'bridge-password');
@@ -206,4 +216,38 @@ test('controller publishes discovery/state and routes Home Assistant commands', 
 
   await controller.stop();
   assert.equal(client.published.filter((entry) => entry.topic === bridge.topics.availability).at(-1).message, 'offline');
+  assert.equal(client.endForce, false);
+});
+
+test('controller enables and disables the Home Assistant bridge as lease ownership changes', async () => {
+  const client = new FakeMqttClient();
+  const bridge = createBridge();
+  bridge.enabled = false;
+  const controller = new MqttController({
+    mqttLibrary: { connect: () => client },
+    runtimeStore: new FakeRuntimeStore(Date.now()),
+    homeAssistantBridge: bridge,
+    homeAssistantConfigured: true,
+    commandTopic: 'device/command',
+    stateTopic: 'device/state',
+    weatherTopic: 'weather/state'
+  });
+
+  await controller.initialize();
+  controller.start();
+  client.emit('connect');
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(controller.getSnapshot().homeAssistant.enabled, false);
+
+  controller.setHomeAssistantLeaseState({ role: 'leader', ownerInstanceId: 'display-one', expiresAt: Date.now() + 30000 });
+  await controller.setHomeAssistantEnabled(true);
+  assert.equal(controller.getSnapshot().homeAssistant.enabled, true);
+  assert.equal(client.subscriptions.some((entry) => entry.topics.includes(bridge.topics.modeCommand)), true);
+  assert.equal(client.published.some((entry) => entry.topic === bridge.topics.discovery), true);
+
+  controller.setHomeAssistantLeaseState({ role: 'standby', ownerInstanceId: 'display-two', expiresAt: Date.now() + 30000 });
+  await controller.setHomeAssistantEnabled(false);
+  assert.equal(controller.getSnapshot().homeAssistant.status, 'standby');
+  assert.equal(client.unsubscribed.includes(bridge.topics.modeCommand), true);
+  await controller.stop();
 });

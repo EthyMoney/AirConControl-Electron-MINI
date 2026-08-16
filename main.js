@@ -3,8 +3,11 @@ const { randomUUID } = require('crypto');
 const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const packageMetadata = require('./package.json');
 const {
+  AIRCON_INSTANCE_ID,
   DESKTOP_MODE,
+  HOME_ASSISTANT_BASE_TOPIC,
   HOME_ASSISTANT_DISCOVERY_ENABLED,
   HOME_ASSISTANT_LEASE_DURATION_MS,
   HOME_ASSISTANT_LEASE_TOPIC,
@@ -12,11 +15,12 @@ const {
   MIN_SET_TEMPERATURE,
   MQTT_BROKER_URL,
   MQTT_CLIENT_ID,
+  MQTT_CONNECT_OPTIONS,
   MQTT_PASSWORD,
   MQTT_USERNAME,
   windowIcon
 } = require('./config');
-const { acquireHomeAssistantLease } = require('./home-assistant-lease');
+const { HomeAssistantLease } = require('./home-assistant-lease');
 const { MqttController } = require('./mqtt-controller');
 
 let mainWindow = null;
@@ -26,8 +30,7 @@ let shutdownStarted = false;
 let shutdownComplete = false;
 
 function getInstanceSuffix() {
-  const hostname = os.hostname().toLowerCase().replace(/[^a-z0-9_-]+/g, '_') || 'host';
-  return `${hostname}_${process.pid}`;
+  return `${AIRCON_INSTANCE_ID}_${process.pid}`;
 }
 
 function sendToRenderer(channel, payload) {
@@ -96,42 +99,68 @@ ipcMain.handle('aircon:get-runtime-report', () => requireController().getRuntime
 app.whenReady().then(async () => {
   const runtimeDataPath = path.join(app.getPath('userData'), 'cooling-runtime-report.json');
   const instanceSuffix = getInstanceSuffix();
-  let homeAssistantEnabled = HOME_ASSISTANT_DISCOVERY_ENABLED;
-  if (homeAssistantEnabled) {
-    homeAssistantLease = await acquireHomeAssistantLease({
-      brokerUrl: MQTT_BROKER_URL,
-      clientId: `${MQTT_CLIENT_ID}_${instanceSuffix}_lease`,
-      ownerId: `${instanceSuffix}_${randomUUID()}`,
-      topic: HOME_ASSISTANT_LEASE_TOPIC,
-      username: MQTT_USERNAME,
-      password: MQTT_PASSWORD,
-      leaseDurationMs: HOME_ASSISTANT_LEASE_DURATION_MS
-    });
-    homeAssistantEnabled = homeAssistantLease.acquired;
-    if (!homeAssistantEnabled) {
-      console.warn(`${homeAssistantLease.reason}; disabling the Home Assistant bridge in this instance.`);
-    }
-  }
 
   mqttController = new MqttController({
     runtimeDataPath,
     legacyDailyPath: path.join(__dirname, 'cooling-runtime-daily.json'),
     legacyHourlyPath: path.join(__dirname, 'cooling-runtime-hourly.json'),
     mqttClientId: `${MQTT_CLIENT_ID}_${instanceSuffix}`,
-    ...(!homeAssistantEnabled && { homeAssistantBridge: null })
+    instanceId: AIRCON_INSTANCE_ID,
+    hostname: os.hostname(),
+    version: packageMetadata.version,
+    homeAssistantConfigured: HOME_ASSISTANT_DISCOVERY_ENABLED,
+    homeAssistantEnabled: false
   });
   await mqttController.initialize();
-  mqttController.on('state', (snapshot) => sendToRenderer('aircon:state', snapshot));
+  mqttController.on('state', (snapshot) => {
+    sendToRenderer('aircon:state', snapshot);
+    if (!shutdownStarted) {
+      homeAssistantLease?.setEligible(snapshot.mqtt.status === 'connected')
+        .catch((error) => console.error('Failed to update Home Assistant bridge eligibility:', error));
+    }
+  });
 
   createWindow();
   mqttController.start();
+
+  if (HOME_ASSISTANT_DISCOVERY_ENABLED) {
+    homeAssistantLease = new HomeAssistantLease({
+      brokerUrl: MQTT_BROKER_URL,
+      clientId: `${MQTT_CLIENT_ID}_${instanceSuffix}_lease`,
+      ownerId: `${instanceSuffix}_${randomUUID()}`,
+      instanceId: AIRCON_INSTANCE_ID,
+      hostname: os.hostname(),
+      version: packageMetadata.version,
+      topic: HOME_ASSISTANT_LEASE_TOPIC,
+      availabilityTopic: `${HOME_ASSISTANT_BASE_TOPIC}/availability`,
+      username: MQTT_USERNAME,
+      password: MQTT_PASSWORD,
+      mqttConnectOptions: MQTT_CONNECT_OPTIONS,
+      eligible: mqttController.getSnapshot().mqtt.status === 'connected',
+      leaseDurationMs: HOME_ASSISTANT_LEASE_DURATION_MS
+    });
+    homeAssistantLease.on('state', (state) => mqttController.setHomeAssistantLeaseState(state));
+    homeAssistantLease.on('acquired', () => {
+      mqttController.setHomeAssistantEnabled(true)
+        .catch(async (error) => {
+          console.error('Failed to enable Home Assistant bridge:', error);
+          await homeAssistantLease.yieldLeadership(`Bridge setup failed: ${error.message}`);
+        })
+        .catch((error) => console.error('Failed to yield Home Assistant bridge lease:', error));
+    });
+    homeAssistantLease.on('lost', () => {
+      mqttController.setHomeAssistantEnabled(false)
+        .catch((error) => console.error('Failed to disable Home Assistant bridge:', error));
+    });
+    homeAssistantLease.start();
+  }
 
   if (process.platform === 'darwin' && !DESKTOP_MODE) {
     app.dock.hide();
   }
 }).catch(async (error) => {
   console.error('Failed to start AirConControl:', error);
-  await homeAssistantLease?.release();
+  await homeAssistantLease?.stop();
   app.quit();
 });
 
@@ -159,7 +188,7 @@ app.on('before-quit', (event) => {
   shutdownStarted = true;
   mqttController.stop()
     .catch((error) => console.error('Failed to flush runtime state:', error))
-    .then(() => homeAssistantLease?.release())
+    .then(() => homeAssistantLease?.stop())
     .catch((error) => console.error('Failed to release Home Assistant bridge lease:', error))
     .finally(() => {
       shutdownComplete = true;

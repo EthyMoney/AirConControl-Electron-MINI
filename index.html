@@ -21,7 +21,36 @@
     <div class="status-section">
       <div class="status-heading-row">
         <h2>Status</h2>
-        <div class="status-health" id="statusHealthLabel">Starting…</div>
+        <div class="status-problems hidden" id="statusProblemIndicators" aria-live="polite"></div>
+        <button class="status-details-toggle" id="statusDetailsToggleButton" aria-label="Show detailed status" aria-expanded="false" aria-controls="statusDetailsPanel" title="Show detailed status"></button>
+      </div>
+      <div class="status-details-panel hidden" id="statusDetailsPanel" role="region" aria-label="Detailed system status" aria-hidden="true">
+        <div class="status-details-header">
+          <strong>System status</strong>
+          <span id="statusDetailsIdentity"></span>
+        </div>
+        <div class="status-details-list">
+          <div class="status-detail-row">
+            <span class="health-icon health-muted" id="mqttHealthIcon" role="img" aria-label="MQTT starting">↕</span>
+            <span class="status-detail-text" id="mqttHealthDetail">MQTT starting</span>
+          </div>
+          <div class="status-detail-row">
+            <span class="health-icon health-muted" id="telemetryHealthIcon" role="img" aria-label="Telemetry waiting">◷</span>
+            <span class="status-detail-text" id="telemetryHealthDetail">Telemetry waiting</span>
+          </div>
+          <div class="status-detail-row">
+            <span class="health-icon health-muted" id="homeAssistantHealthIcon" role="img" aria-label="Home Assistant starting">⌂</span>
+            <span class="status-detail-text" id="homeAssistantHealthDetail">Home Assistant starting</span>
+          </div>
+          <div class="status-detail-row">
+            <span class="health-icon health-muted" id="runtimeSyncHealthIcon" role="img" aria-label="Runtime history local">↻</span>
+            <span class="status-detail-text" id="runtimeSyncHealthDetail">Runtime history local</span>
+          </div>
+          <div class="status-detail-row">
+            <span class="health-icon health-muted" id="storageHealthIcon" role="img" aria-label="Storage starting">▣</span>
+            <span class="status-detail-text" id="storageHealthDetail">Storage starting</span>
+          </div>
+        </div>
       </div>
       <div class="status-runtime" id="statusRuntimeLabel"></div>
       <button class="status-runtime-info-button" id="statusRuntimeInfoButton">i</button>

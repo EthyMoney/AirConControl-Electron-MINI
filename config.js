@@ -1,3 +1,5 @@
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://192.168.1.216';
@@ -44,6 +46,11 @@ function getBooleanEnvironmentValue(name, fallback) {
   return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
 }
 
+function getOptionalFileEnvironmentValue(name) {
+  const filePath = process.env[name];
+  return filePath ? fs.readFileSync(path.resolve(filePath)) : undefined;
+}
+
 // Desktop mode runs the app in a normal resizable window with a visible mouse cursor
 // instead of the frameless, cursor-hidden kiosk layout used on the touchscreen.
 function isDesktopModeEnabled() {
@@ -79,10 +86,30 @@ const HOME_ASSISTANT_LEASE_DURATION_MS = getPositiveIntegerEnvironmentValue(
   'HOME_ASSISTANT_LEASE_DURATION_MS',
   30000
 );
+const AIRCON_INSTANCE_ID = String(process.env.AIRCON_INSTANCE_ID || `${os.hostname()}${DESKTOP_MODE ? '_desktop' : ''}`)
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9_-]+/g, '_') || 'aircon-display';
+const AIRCON_FLEET_TOPIC = process.env.AIRCON_FLEET_TOPIC || `${HOME_ASSISTANT_BASE_TOPIC}/instances`;
+const AIRCON_FLEET_STATUS_INTERVAL_MS = getPositiveIntegerEnvironmentValue(
+  'AIRCON_FLEET_STATUS_INTERVAL_MS',
+  60000
+);
+const SHARED_RUNTIME_TOPIC = process.env.SHARED_RUNTIME_TOPIC || `${HOME_ASSISTANT_BASE_TOPIC}/runtime/report`;
+const SHARED_RUNTIME_INTERVAL_MS = getPositiveIntegerEnvironmentValue('SHARED_RUNTIME_INTERVAL_MS', 300000);
 const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID
   || `${HOME_ASSISTANT_DEVICE_ID}_bridge${DESKTOP_MODE ? '_desktop' : ''}`;
+const MQTT_CONNECT_OPTIONS = {
+  rejectUnauthorized: getBooleanEnvironmentValue('MQTT_TLS_REJECT_UNAUTHORIZED', true),
+  ca: getOptionalFileEnvironmentValue('MQTT_CA_FILE'),
+  cert: getOptionalFileEnvironmentValue('MQTT_CERT_FILE'),
+  key: getOptionalFileEnvironmentValue('MQTT_KEY_FILE')
+};
 
 module.exports = {
+  AIRCON_FLEET_STATUS_INTERVAL_MS,
+  AIRCON_FLEET_TOPIC,
+  AIRCON_INSTANCE_ID,
   AIRCON_STALE_AFTER_MS,
   AIRCON_STALE_RETRY_MS,
   COMMAND_TIMEOUT_MS,
@@ -104,12 +131,15 @@ module.exports = {
   HOME_ASSISTANT_STATE_INTERVAL_MS,
   MQTT_BROKER_URL,
   MQTT_CLIENT_ID,
+  MQTT_CONNECT_OPTIONS,
   MQTT_PASSWORD,
   MQTT_TOPIC_AIRCON,
   MQTT_TOPIC_AIRCON_COMMAND,
   MQTT_TOPIC_AIRCON_STATE,
   MQTT_TOPIC_TEMPEST_STATS,
   MQTT_USERNAME,
+  SHARED_RUNTIME_INTERVAL_MS,
+  SHARED_RUNTIME_TOPIC,
   TEMPERATURE_HISTORY_SAMPLE_MS,
   WEATHER_STALE_AFTER_MS,
   windowIcon: path.join(__dirname, 'snow.ico')

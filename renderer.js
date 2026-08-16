@@ -18,7 +18,20 @@ const TEMPERATURE_CHART_MIN_HEIGHT = 180;
 const TEMPERATURE_LINE_GAP_MS = 15 * 60 * 1000;
 
 const currentStatusLabel = document.getElementById('currentStatusLabel');
-const statusHealthLabel = document.getElementById('statusHealthLabel');
+const statusProblemIndicators = document.getElementById('statusProblemIndicators');
+const statusDetailsToggleButton = document.getElementById('statusDetailsToggleButton');
+const statusDetailsPanel = document.getElementById('statusDetailsPanel');
+const statusDetailsIdentity = document.getElementById('statusDetailsIdentity');
+const mqttHealthIcon = document.getElementById('mqttHealthIcon');
+const telemetryHealthIcon = document.getElementById('telemetryHealthIcon');
+const homeAssistantHealthIcon = document.getElementById('homeAssistantHealthIcon');
+const runtimeSyncHealthIcon = document.getElementById('runtimeSyncHealthIcon');
+const storageHealthIcon = document.getElementById('storageHealthIcon');
+const mqttHealthDetail = document.getElementById('mqttHealthDetail');
+const telemetryHealthDetail = document.getElementById('telemetryHealthDetail');
+const homeAssistantHealthDetail = document.getElementById('homeAssistantHealthDetail');
+const runtimeSyncHealthDetail = document.getElementById('runtimeSyncHealthDetail');
+const storageHealthDetail = document.getElementById('storageHealthDetail');
 const commandStatusLabel = document.getElementById('commandStatusLabel');
 const setTempElement = document.getElementById('setTemp');
 const currentTempElement = document.getElementById('currentTemp');
@@ -70,6 +83,41 @@ function setAnimatedText(element, value) {
 function setLightState(element, state) {
   element.classList.remove('on', 'off', 'unknown');
   element.classList.add(state === true ? 'on' : state === false ? 'off' : 'unknown');
+}
+
+function setHealthIndicator(element, state, label) {
+  element.classList.remove('health-ok', 'health-info', 'health-warning', 'health-error', 'health-muted');
+  element.classList.add(`health-${state}`);
+  element.title = label;
+  element.setAttribute('aria-label', label);
+}
+
+function setStatusDetailsExpanded(expanded) {
+  statusDetailsPanel.classList.toggle('hidden', !expanded);
+  statusDetailsPanel.setAttribute('aria-hidden', String(!expanded));
+  statusDetailsToggleButton.setAttribute('aria-expanded', String(expanded));
+  const label = expanded ? 'Hide detailed status' : 'Show detailed status';
+  statusDetailsToggleButton.title = label;
+  statusDetailsToggleButton.setAttribute('aria-label', label);
+}
+
+function renderProblemIndicators(indicators) {
+  const problems = indicators.filter(({ state }) => state === 'warning' || state === 'error');
+  const elements = problems.map(({ element, state, label }) => {
+    const problemIcon = document.createElement('span');
+    problemIcon.className = `health-icon status-problem-icon health-${state}`;
+    problemIcon.textContent = element.textContent;
+    problemIcon.title = label;
+    problemIcon.setAttribute('role', 'img');
+    problemIcon.setAttribute('aria-label', label);
+    return problemIcon;
+  });
+  statusProblemIndicators.replaceChildren(...elements);
+  statusProblemIndicators.classList.toggle('hidden', problems.length === 0);
+  statusProblemIndicators.setAttribute(
+    'aria-label',
+    problems.length === 0 ? 'No system problems' : `System problems: ${problems.map(({ label }) => label).join('. ')}`
+  );
 }
 
 function formatTaskLabel(task, enabled) {
@@ -275,7 +323,7 @@ function renderState() {
     return;
   }
 
-  const { mqtt, aircon, weather, command, storage, homeAssistant } = latestState;
+  const { mqtt, aircon, weather, command, storage, homeAssistant, runtimeSync, system } = latestState;
   const reported = aircon.reported;
   let statusLabel;
   if (reported) {
@@ -296,20 +344,50 @@ function renderState() {
   const runtimeMs = getLiveRuntimeMs(reported, aircon);
   statusRuntimeLabel.textContent = runtimeMs === null ? '' : `for ${formatMillisecondsToDuration(runtimeMs)}`;
 
-  const healthParts = [`MQTT ${mqtt.status}`];
-  if (aircon.receivedAt) {
-    healthParts.push(`${aircon.freshness === 'stale' ? 'stale, last update' : 'updated'} ${formatAge(aircon.receivedAt)}`);
+  const leaseExpiry = Number.isFinite(homeAssistant?.leaseExpiresAt)
+    ? new Date(homeAssistant.leaseExpiresAt).toLocaleTimeString()
+    : 'none';
+  const mqttLabel = `MQTT ${mqtt.status}${system?.secureMqtt ? ' using TLS' : ' without TLS'}`;
+  const telemetryLabel = aircon.error
+    ? aircon.error
+    : aircon.receivedAt
+      ? `Telemetry ${aircon.freshness}; updated ${formatAge(aircon.receivedAt)}`
+      : 'Telemetry waiting for first status';
+  const homeAssistantLabel = `Home Assistant ${homeAssistant?.role || 'disabled'}; owner ${homeAssistant?.ownerInstanceId || 'none'}; lease ${leaseExpiry}`;
+  const runtimeLabel = `Runtime history ${runtimeSync?.status || 'local'}; source ${runtimeSync?.sourceInstanceId || 'local'}`;
+  const storageLabel = storage.error ? `Storage ${storage.status}: ${storage.error}` : `Storage ${storage.status}`;
+
+  const mqttState = mqtt.status === 'connected'
+    ? 'ok'
+    : mqtt.status === 'reconnecting'
+      ? 'warning'
+      : ['offline', 'closed', 'error'].includes(mqtt.status) ? 'error' : 'info';
+  const telemetryState = aircon.error
+    ? 'error'
+    : aircon.freshness === 'fresh' ? 'ok' : aircon.freshness === 'stale' ? 'warning' : 'muted';
+  const homeAssistantState = homeAssistant?.role === 'leader'
+    ? (homeAssistant.status === 'online' ? 'ok' : ['error', 'offline', 'lease-error'].includes(homeAssistant.status) ? 'error' : 'info')
+    : homeAssistant?.role === 'standby'
+      ? 'info'
+      : ['error', 'disconnected'].includes(homeAssistant?.role) ? 'error' : homeAssistant?.role === 'disabled' ? 'muted' : 'info';
+  const runtimeState = runtimeSync?.error
+    ? 'error'
+    : runtimeSync?.status === 'publishing' ? 'ok' : runtimeSync?.status === 'shared' ? 'info' : runtimeSync?.status === 'unverified' ? 'warning' : 'muted';
+  const storageState = storage.status === 'ready' ? 'ok' : storage.status === 'warning' ? 'warning' : 'error';
+
+  const indicators = [
+    { element: mqttHealthIcon, detail: mqttHealthDetail, state: mqttState, label: mqttLabel },
+    { element: telemetryHealthIcon, detail: telemetryHealthDetail, state: telemetryState, label: telemetryLabel },
+    { element: homeAssistantHealthIcon, detail: homeAssistantHealthDetail, state: homeAssistantState, label: homeAssistantLabel },
+    { element: runtimeSyncHealthIcon, detail: runtimeSyncHealthDetail, state: runtimeState, label: runtimeLabel },
+    { element: storageHealthIcon, detail: storageHealthDetail, state: storageState, label: storageLabel }
+  ];
+  for (const indicator of indicators) {
+    setHealthIndicator(indicator.element, indicator.state, indicator.label);
+    indicator.detail.textContent = indicator.label;
   }
-  if (aircon.error) {
-    healthParts.push(aircon.error);
-  }
-  if (storage.status !== 'ready') {
-    healthParts.push(`storage ${storage.status}`);
-  }
-  if (homeAssistant?.enabled) {
-    healthParts.push(`HA ${homeAssistant.status}`);
-  }
-  statusHealthLabel.textContent = healthParts.join(' · ');
+  renderProblemIndicators(indicators);
+  statusDetailsIdentity.textContent = `${system?.instanceId || 'unknown'} · v${system?.version || '?'} · ${system?.secureMqtt ? 'TLS' : 'no TLS'}`;
 
   renderWeather(weather);
   renderCommand(command);
@@ -692,13 +770,19 @@ async function openRuntimeReport() {
   runtimeReportList.innerHTML = '';
   runtimeReportMeta.textContent = 'Loading report…';
   closeRuntimeReportDay();
+  setStatusDetailsExpanded(false);
   runtimeReportScreen.classList.remove('hidden');
   try {
     runtimeReportCache = await window.airconApi.getRuntimeReport();
     const generated = new Date(runtimeReportCache.generatedAt).toLocaleString();
     const gapCount = runtimeReportCache.gaps?.length || 0;
     const warning = runtimeReportCache.warning ? ` · ${runtimeReportCache.warning}` : '';
-    runtimeReportMeta.textContent = `Generated ${generated} · ${runtimeReportCache.timezone} · ${gapCount} coverage gap${gapCount === 1 ? '' : 's'}${warning}`;
+    const source = runtimeReportCache.shared
+      ? ` · Shared from ${runtimeReportCache.sourceInstanceId}`
+      : ` · Local ${latestState?.system?.instanceId || ''}`;
+    const bridge = latestState?.homeAssistant;
+    const owner = bridge?.ownerInstanceId ? ` (${bridge.ownerInstanceId})` : '';
+    runtimeReportMeta.textContent = `v${latestState?.system?.version || '?'} · HA ${bridge?.role || 'disabled'}${owner}${source} · Generated ${generated} · ${runtimeReportCache.timezone} · ${gapCount} coverage gap${gapCount === 1 ? '' : 's'}${warning}`;
     renderRuntimeReportRows(runtimeReportCache);
   } catch (_error) {
     runtimeReportMeta.textContent = 'Runtime report unavailable.';
@@ -737,6 +821,21 @@ powerOffButton.addEventListener('click', () => sendCommand('off'));
 tempDecreaseButton.addEventListener('click', () => handleTemperatureChange(-1));
 tempIncreaseButton.addEventListener('click', () => handleTemperatureChange(1));
 statusRuntimeInfoButton.addEventListener('click', openRuntimeReport);
+statusDetailsToggleButton.addEventListener('click', () => {
+  setStatusDetailsExpanded(statusDetailsToggleButton.getAttribute('aria-expanded') !== 'true');
+});
+document.addEventListener('click', (event) => {
+  if (
+    statusDetailsToggleButton.getAttribute('aria-expanded') === 'true'
+    && !statusDetailsPanel.contains(event.target)
+    && !statusDetailsToggleButton.contains(event.target)
+  ) {
+    setStatusDetailsExpanded(false);
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setStatusDetailsExpanded(false);
+});
 runtimeReportCloseButton.addEventListener('click', closeRuntimeReport);
 runtimeReportDayBackButton.addEventListener('click', closeRuntimeReportDay);
 temperatureHistoryViewButton.addEventListener('click', () => setRuntimeReportDayView('temperature'));

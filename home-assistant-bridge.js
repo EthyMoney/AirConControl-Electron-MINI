@@ -86,8 +86,8 @@ class HomeAssistantBridge {
     };
   }
 
-  getSubscriptions() {
-    if (!this.enabled) {
+  getSubscriptions({ includeDisabled = false } = {}) {
+    if (!this.enabled && !includeDisabled) {
       return [];
     }
     return [
@@ -196,6 +196,36 @@ class HomeAssistantBridge {
           entity_category: 'diagnostic',
           state_topic: stateTopic,
           value_template: '{{ value_json.last_status }}'
+        },
+        bridge_instance: {
+          platform: 'sensor',
+          unique_id: uniqueId('bridge_instance'),
+          default_entity_id: `sensor.${this.deviceId}_bridge_instance`,
+          name: 'Bridge instance',
+          icon: 'mdi:server-network',
+          entity_category: 'diagnostic',
+          state_topic: stateTopic,
+          value_template: '{{ value_json.bridge_instance }}'
+        },
+        bridge_version: {
+          platform: 'sensor',
+          unique_id: uniqueId('bridge_version'),
+          default_entity_id: `sensor.${this.deviceId}_bridge_version`,
+          name: 'Bridge version',
+          icon: 'mdi:tag-outline',
+          entity_category: 'diagnostic',
+          state_topic: stateTopic,
+          value_template: '{{ value_json.bridge_version }}'
+        },
+        runtime_source: {
+          platform: 'sensor',
+          unique_id: uniqueId('runtime_source'),
+          default_entity_id: `sensor.${this.deviceId}_runtime_source`,
+          name: 'Runtime source',
+          icon: 'mdi:database-sync-outline',
+          entity_category: 'diagnostic',
+          state_topic: stateTopic,
+          value_template: '{{ value_json.runtime_source }}'
         }
       }
     };
@@ -227,6 +257,10 @@ class HomeAssistantBridge {
       cooling_runtime_today_seconds: Math.floor(Math.max(0, runtimeMs) / 1000),
       freshness: aircon.freshness || 'unknown',
       last_status: Number.isFinite(aircon.receivedAt) ? new Date(aircon.receivedAt).toISOString() : null,
+      bridge_instance: snapshot.system?.instanceId || 'unknown',
+      bridge_version: snapshot.system?.version || this.version,
+      bridge_role: snapshot.homeAssistant?.role || 'unknown',
+      runtime_source: snapshot.runtimeSync?.sourceInstanceId || snapshot.system?.instanceId || 'unknown',
       command: snapshot.command
         ? {
             source: snapshot.command.source,
