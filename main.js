@@ -32,6 +32,15 @@ let shutdownComplete = false;
 let systemPowerRequested = false;
 const raspberryPi = isRaspberryPi();
 
+// Process supervisors stop services with SIGTERM. Route that through Electron's normal
+// quit lifecycle so MQTT presence, lease ownership, and runtime history are flushed first.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.once(signal, () => {
+    console.log(`Received ${signal}; shutting down AirConControl cleanly.`);
+    app.quit();
+  });
+}
+
 function getInstanceSuffix() {
   return `${AIRCON_INSTANCE_ID}_${process.pid}`;
 }

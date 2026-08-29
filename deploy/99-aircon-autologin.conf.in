@@ -1,0 +1,5 @@
+[Seat:*]
+autologin-user=@AIRCON_USER@
+autologin-user-timeout=0
+user-session=openbox
+autologin-session=openbox

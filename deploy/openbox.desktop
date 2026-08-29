@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Openbox
+Comment=Openbox window manager
+Exec=openbox-session
+TryExec=openbox-session
+Type=XSession

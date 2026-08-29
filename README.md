@@ -187,26 +187,63 @@ Electron sandboxing is enabled by default. On a system that cannot provide eithe
 
 ### Raspberry Pi kiosk
 
-The installer handles the system packages, Node.js, repository checkout, dependencies, LightDM autologin, and Openbox kiosk startup:
+The installer has explicit modes so routine maintenance cannot accidentally rewrite boot or
+display configuration. A new kiosk is provisioned with:
 
 ```bash
-sudo ./installer.sh
+sudo bash ./installer.sh install --user logan --display dsi
 ```
 
-On first installation it creates `~/.config/aircon-control.env` from `.env.example`, restricts it
-to the kiosk user (`0600`), and loads it before each app start. Configure each Pi's unique
-`AIRCON_INSTANCE_ID`, broker credentials, and TLS certificate paths there. Updates preserve this
-file.
+`install` configures the required system packages, pinned Node.js major version, repository,
+LightDM/Openbox session, systemd user service, power policy, boot/display settings, and Plymouth.
+It does not perform a blanket OS upgrade unless `--system-upgrade` is supplied, and it reboots
+only with `--reboot`. Preview its scope without changing the machine with `--dry-run`.
+
+For an existing manually configured kiosk, run `repair` once. It backs up managed files, installs
+the supervised service, migrates away from the legacy Openbox restart loop, repairs ownership and
+dependencies, and configures the power policy. It deliberately leaves boot files, display
+drivers, and Plymouth untouched:
+
+```bash
+sudo bash ./installer.sh repair --user logan
+```
+
+After that, ordinary deployments use the narrow update path:
+
+```bash
+sudo bash ./installer.sh update --user logan
+```
+
+`update` requires a clean checkout, performs only `git pull --ff-only` and `npm ci`, then restarts
+the supervised application and prints a health report. To add or repair just the power policy:
+
+```bash
+sudo bash ./installer.sh configure-power --user logan
+```
+
+Files replaced by `install` or `repair` are preserved under a timestamped directory in
+`/var/backups/aircon-control/`. The application runs as a systemd user service rather than an
+unmanaged shell loop. Useful diagnostics are:
+
+```bash
+systemctl --user status aircon-control.service
+journalctl --user -u aircon-control.service
+```
+
+On first installation or repair, `~/.config/aircon-control.env` is created from `.env.example`,
+restricted to the kiosk user (`0600`), and loaded by systemd before each app start. Configure each
+Pi's unique `AIRCON_INSTANCE_ID`, broker credentials, and TLS certificate paths there. All modes
+preserve an existing environment file.
 
 On Raspberry Pi hardware, a power icon appears beside the humidity reading. It opens large
 touchscreen actions for restarting or shutting down the Pi. The installer adds a narrowly scoped
 polkit rule so only the kiosk user can invoke those two system actions without an authentication
 prompt. The button stays hidden on desktop builds and non-Pi Linux systems.
 
-The native DSI display path is the default. For an older SPI display, use:
+The native DSI display path is the default. Full provisioning for an older SPI display uses:
 
 ```bash
-DISPLAY_TYPE=spi sudo ./installer.sh
+sudo bash ./installer.sh install --user logan --display spi
 ```
 
 ### Windows desktop build
@@ -260,7 +297,7 @@ npm run render:plymouth
 
 ## Development and verification
 
-- `npm test` runs behavioral tests for telemetry validation, Home Assistant discovery/state/commands, runtime parsing, state isolation, command acknowledgement/timeouts, persistence, temperature sampling, cooling intervals, stale gaps, midnight allocation, and legacy migration.
+- `npm test` runs behavioral tests for telemetry validation, Home Assistant discovery/state/commands, runtime parsing, state isolation, command acknowledgement/timeouts, persistence, temperature sampling, cooling intervals, stale gaps, midnight allocation, legacy migration, and safe installer mode boundaries.
 - `npm run lint` checks all JavaScript entry points for syntax errors.
 - `npm run package` builds an unpacked Electron bundle.
 - `npm run dist` creates installable artifacts with electron-builder.

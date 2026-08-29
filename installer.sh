@@ -1,321 +1,547 @@
 #!/bin/bash
 set -euo pipefail
 
-USERNAME="${SUDO_USER:-${USER:-pi}}"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly NODE_MAJOR="${NODE_MAJOR:-24}"
+readonly N_VERSION="${N_VERSION:-10.2.0}"
+readonly REPOSITORY_URL="${AIRCON_REPOSITORY_URL:-https://github.com/EthyMoney/AirConControl-Electron-MINI.git}"
+
+MODE=""
+TARGET_USER="${SUDO_USER:-}"
 DISPLAY_TYPE="${DISPLAY_TYPE:-dsi}"
-APP_DIR="/home/$USERNAME/AirConControl-Electron-MINI"
-CONFIG_DIR="/home/$USERNAME/.config"
-APP_ENV_FILE="$CONFIG_DIR/aircon-control.env"
-OPENBOX_DIR="$CONFIG_DIR/openbox"
-AUTOSTART_FILE="$OPENBOX_DIR/autostart"
-XSESSION_FILE="/home/$USERNAME/.xsession"
-PICOM_CONF="$CONFIG_DIR/picom.conf"
-LIGHTDM_CONF_DIR="/etc/lightdm/lightdm.conf.d"
-LIGHTDM_AUTLOGIN_FILE="$LIGHTDM_CONF_DIR/99-aircon-autologin.conf"
-CALIBRATION_FILE="/etc/X11/xorg.conf.d/99-calibration.conf"
-LCD_SHOW_DIR="/home/$USERNAME/LCD-show"
-POWER_POLICY_FILE="/etc/polkit-1/rules.d/49-aircon-control-power.rules"
+DRY_RUN=false
+SYSTEM_UPGRADE=false
+REBOOT_AFTER=false
+
+usage() {
+  cat <<'EOF'
+Usage:
+  sudo bash ./installer.sh install [options]
+  sudo bash ./installer.sh update [options]
+  sudo bash ./installer.sh repair [options]
+  sudo bash ./installer.sh configure-power [options]
+
+Modes:
+  install          Provision a new kiosk, including boot/display configuration.
+  update           Pull, run npm ci, and restart an already supervised app.
+  repair           Repair packages, session files, service, permissions, and dependencies.
+  configure-power  Install only the Raspberry Pi reboot/shutdown authorization policy.
+
+Options:
+  --user USER          Kiosk account. Required when not invoked through sudo by that user.
+  --display TYPE       dsi or spi; used only by install (default: dsi).
+  --system-upgrade     Run apt upgrade during install. Never implied by another mode.
+  --reboot             Reboot after a successful install.
+  --dry-run            Print the selected mode's scope without changing the machine.
+  -h, --help           Show this help.
+
+Examples:
+  sudo bash ./installer.sh install --user logan --display dsi
+  sudo bash ./installer.sh update --user logan
+  sudo bash ./installer.sh repair --user logan
+  sudo bash ./installer.sh configure-power --user logan
+EOF
+}
+
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+log_section() {
+  echo ""
+  echo "====== $* ======"
+  echo ""
+}
+
+while (($#)); do
+  case "$1" in
+    install|update|repair|configure-power)
+      [ -z "$MODE" ] || die "Only one mode can be selected."
+      MODE="$1"
+      shift
+      ;;
+    --user)
+      (($# >= 2)) || die "--user requires a value."
+      TARGET_USER="$2"
+      shift 2
+      ;;
+    --display)
+      (($# >= 2)) || die "--display requires dsi or spi."
+      DISPLAY_TYPE="$2"
+      shift 2
+      ;;
+    --system-upgrade)
+      SYSTEM_UPGRADE=true
+      shift
+      ;;
+    --reboot)
+      REBOOT_AFTER=true
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown argument '$1'. Run bash ./installer.sh --help for usage."
+      ;;
+  esac
+done
+
+[ -n "$MODE" ] || {
+  usage >&2
+  exit 2
+}
+
+if $SYSTEM_UPGRADE && [ "$MODE" != install ]; then
+  die "--system-upgrade is available only with install."
+fi
+if $REBOOT_AFTER && [ "$MODE" != install ]; then
+  die "--reboot is available only with install."
+fi
+if [ "$MODE" = install ] && [ "$DISPLAY_TYPE" != dsi ] && [ "$DISPLAY_TYPE" != spi ]; then
+  die "Unsupported display '$DISPLAY_TYPE'. Use dsi or spi."
+fi
+
+if $DRY_RUN; then
+  echo "Mode: $MODE"
+  echo "User: ${TARGET_USER:-<required>}"
+  case "$MODE" in
+    install)
+      echo "Scope: system packages, pinned Node.js, application, X11/LightDM, systemd user service, power policy, boot/display settings, and Plymouth"
+      echo "System upgrade: $SYSTEM_UPGRADE"
+      echo "Display: $DISPLAY_TYPE"
+      echo "Reboot after completion: $REBOOT_AFTER"
+      ;;
+    update)
+      echo "Scope: git pull --ff-only, npm ci, supervised application restart, and health report"
+      ;;
+    repair)
+      echo "Scope: required packages, pinned Node.js, managed-file backups, X11/LightDM, systemd user service, power policy, npm ci, and health report"
+      echo "Excluded: boot files, display drivers, Plymouth, apt upgrade, and reboot"
+      ;;
+    configure-power)
+      echo "Scope: Raspberry Pi power policy and authorization health check only"
+      ;;
+  esac
+  exit 0
+fi
+
+[[ $EUID -eq 0 ]] || die "Run this command with sudo."
+[ -n "$TARGET_USER" ] || die "Specify the kiosk account with --user USER."
+[ "$TARGET_USER" != root ] || die "The kiosk account cannot be root. Use --user with the desktop login account."
+id -u "$TARGET_USER" >/dev/null 2>&1 || die "User '$TARGET_USER' does not exist."
+
+readonly TARGET_UID="$(id -u "$TARGET_USER")"
+readonly TARGET_GROUP="$(id -gn "$TARGET_USER")"
+readonly USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+[ -n "$USER_HOME" ] && [ "$USER_HOME" != / ] || die "Could not determine a safe home directory for '$TARGET_USER'."
+
+readonly APP_DIR="$USER_HOME/AirConControl-Electron-MINI"
+readonly CONFIG_DIR="$USER_HOME/.config"
+readonly APP_ENV_FILE="$CONFIG_DIR/aircon-control.env"
+readonly OPENBOX_DIR="$CONFIG_DIR/openbox"
+readonly AUTOSTART_FILE="$OPENBOX_DIR/autostart"
+readonly XSESSION_FILE="$USER_HOME/.xsession"
+readonly USER_SYSTEMD_DIR="$CONFIG_DIR/systemd/user"
+readonly USER_SERVICE_FILE="$USER_SYSTEMD_DIR/aircon-control.service"
+readonly LIGHTDM_CONF_DIR="/etc/lightdm/lightdm.conf.d"
+readonly LIGHTDM_AUTLOGIN_FILE="$LIGHTDM_CONF_DIR/99-aircon-autologin.conf"
+readonly OPENBOX_SESSION_FILE="/usr/share/xsessions/openbox.desktop"
+readonly CALIBRATION_FILE="/etc/X11/xorg.conf.d/99-calibration.conf"
+readonly LCD_SHOW_DIR="$USER_HOME/LCD-show"
+readonly POWER_POLICY_FILE="/etc/polkit-1/rules.d/49-aircon-control-power.rules"
+readonly BACKUP_ROOT="/var/backups/aircon-control"
+readonly RUN_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+readonly BACKUP_DIR="$BACKUP_ROOT/$RUN_TIMESTAMP"
+readonly TEMP_DIR="$(mktemp -d)"
+trap 'rm -rf -- "$TEMP_DIR"' EXIT
+
+backup_file() {
+  local source_path="$1"
+  local relative_path destination_path
+  [ -e "$source_path" ] || [ -L "$source_path" ] || return 0
+  relative_path="${source_path#/}"
+  destination_path="$BACKUP_DIR/$relative_path"
+  mkdir -p "$(dirname "$destination_path")"
+  cp -a -- "$source_path" "$destination_path"
+  echo "Backed up $source_path to $destination_path"
+}
+
+install_managed_file() {
+  local source_path="$1"
+  local destination_path="$2"
+  local mode="$3"
+  local owner="$4"
+  local group="$5"
+  if [ -f "$destination_path" ] && cmp -s "$source_path" "$destination_path"; then
+    chown "$owner:$group" "$destination_path"
+    chmod "$mode" "$destination_path"
+    return
+  fi
+  backup_file "$destination_path"
+  install -D -o "$owner" -g "$group" -m "$mode" "$source_path" "$destination_path"
+}
+
+run_as_user() {
+  runuser -u "$TARGET_USER" -- env \
+    HOME="$USER_HOME" \
+    PATH="/usr/local/bin:/usr/bin:/bin" \
+    "$@"
+}
+
+user_systemctl_available() {
+  [ -S "/run/user/$TARGET_UID/bus" ]
+}
+
+user_systemctl() {
+  runuser -u "$TARGET_USER" -- env \
+    HOME="$USER_HOME" \
+    XDG_RUNTIME_DIR="/run/user/$TARGET_UID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TARGET_UID/bus" \
+    PATH="/usr/local/bin:/usr/bin:/bin" \
+    systemctl --user "$@"
+}
 
 detect_boot_config_file() {
   if [ -f /boot/firmware/config.txt ]; then
     echo /boot/firmware/config.txt
-    return
+  else
+    echo /boot/config.txt
   fi
-
-  echo /boot/config.txt
 }
 
 detect_boot_cmdline_file() {
   if [ -f /boot/firmware/cmdline.txt ]; then
     echo /boot/firmware/cmdline.txt
-    return
+  else
+    echo /boot/cmdline.txt
   fi
-
-  echo /boot/cmdline.txt
 }
 
 ensure_config_line() {
   local file_path="$1"
   local line="$2"
-
-  if ! grep -Fqx "$line" "$file_path"; then
-    echo "$line" >> "$file_path"
-  fi
+  grep -Fqx "$line" "$file_path" || echo "$line" >> "$file_path"
 }
 
 ensure_cmdline_arg() {
   local file_path="$1"
   local arg="$2"
+  tr ' ' '\n' < "$file_path" | grep -Fqx "$arg" || sed -i "1 s|$| ${arg}|" "$file_path"
+}
 
-  if ! tr ' ' '\n' < "$file_path" | grep -Fqx "$arg"; then
-    sed -i "1 s|$| ${arg}|" "$file_path"
+install_required_packages() {
+  log_section "Installing required packages"
+  apt update
+  apt install -y \
+    git lightdm openbox python3-xdg polkitd \
+    xserver-xorg xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all xserver-xorg-input-libinput \
+    xinit x11-xserver-utils npm \
+    libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 \
+    libdrm2 libgbm1 libasound2 libxkbcommon0 libxshmfence1
+  if [ "$MODE" = install ]; then
+    apt install -y plymouth plymouth-label
+  fi
+  if $SYSTEM_UPGRADE; then
+    log_section "Performing explicitly requested system upgrade"
+    apt upgrade -y
   fi
 }
 
-BOOT_CONFIG_FILE="$(detect_boot_config_file)"
-BOOT_CMDLINE_FILE="$(detect_boot_cmdline_file)"
-
-if [[ $EUID -ne 0 ]]; then
-  echo "This script must be run as root"
-  exit 1
-fi
-
-echo ""
-echo "======================= Minimal Display Manager With Single Application Kiosk Installer For Raspberry Pi ======================="
-echo ""
-echo "====== Running Pre-Installation Checks ======"
-echo ""
-
-if ! ping -q -c 1 -W 1 google.com >/dev/null; then
-  echo "The internet is not reachable. Please check your network connection and try again."
-  exit 1
-fi
-
-if ! id -u "$USERNAME" >/dev/null 2>&1; then
-  echo "The configured username '$USERNAME' does not exist. Create the user or re-run the script with sudo from the target account."
-  exit 1
-fi
-
-if [[ "$DISPLAY_TYPE" != "dsi" && "$DISPLAY_TYPE" != "spi" ]]; then
-  echo "Unsupported DISPLAY_TYPE '$DISPLAY_TYPE'. Use DISPLAY_TYPE=dsi or DISPLAY_TYPE=spi."
-  exit 1
-fi
-
-echo "Pre-installation checks passed. Proceeding with installation..."
-echo ""
-echo "====== Performing System Update ======"
-echo ""
-
-apt update
-apt upgrade -y
-
-echo ""
-echo "====== Installing APT Packages ======"
-echo ""
-
-apt install -y \
-  vnstat neofetch git lightdm picom net-tools polkitd plymouth plymouth-label \
-  xserver-xorg xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all xserver-xorg-input-libinput \
-  xinit x11-xserver-utils openbox npm wavemon \
-  libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libdrm2 libgbm1 libasound2 libxkbcommon0 libxshmfence1
-
-echo ""
-echo "====== Installing Updated Node.js and NPM + Global Packages ======"
-echo ""
-
-npm i -g n
-n lts
-export PATH="/usr/local/bin:$PATH"
-hash -r
-npm i -g npm npm-check-updates eslint ts-node typescript pm2
-hash -r
-
-echo ""
-echo "====== Configuring X11 Kiosk Session ======"
-echo ""
-
-mkdir -p "$OPENBOX_DIR"
-echo '#!/bin/bash' > "$AUTOSTART_FILE"
-echo '' >> "$AUTOSTART_FILE"
-echo 'xset s off' >> "$AUTOSTART_FILE"
-echo 'xset -dpms' >> "$AUTOSTART_FILE"
-echo 'xset s noblank' >> "$AUTOSTART_FILE"
-echo "xsetroot -solid '#080d12'" >> "$AUTOSTART_FILE"
-echo 'picom -b &' >> "$AUTOSTART_FILE"
-echo 'export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' >> "$AUTOSTART_FILE"
-echo 'while true; do' >> "$AUTOSTART_FILE"
-echo '  echo "Starting application..."' >> "$AUTOSTART_FILE"
-echo '  (' >> "$AUTOSTART_FILE"
-echo '    set -a' >> "$AUTOSTART_FILE"
-echo "    [ ! -f \"$APP_ENV_FILE\" ] || . \"$APP_ENV_FILE\"" >> "$AUTOSTART_FILE"
-echo '    set +a' >> "$AUTOSTART_FILE"
-echo "    cd \"$APP_DIR\"" >> "$AUTOSTART_FILE"
-echo '    npm start' >> "$AUTOSTART_FILE"
-echo '  )' >> "$AUTOSTART_FILE"
-echo '  sleep 5' >> "$AUTOSTART_FILE"
-echo 'done &' >> "$AUTOSTART_FILE"
-chmod +x "$AUTOSTART_FILE"
-
-echo '#!/bin/bash' > "$XSESSION_FILE"
-echo 'xset s off' >> "$XSESSION_FILE"
-echo 'xset -dpms' >> "$XSESSION_FILE"
-echo 'xset s noblank' >> "$XSESSION_FILE"
-echo 'exec openbox-session' >> "$XSESSION_FILE"
-chmod +x "$XSESSION_FILE"
-chown "$USERNAME:$USERNAME" "$XSESSION_FILE"
-
-echo ""
-echo "Openbox autostart and X11 session configured."
-echo ""
-echo "====== Configuring LightDM Autologin ======"
-echo ""
-
-mkdir -p "$LIGHTDM_CONF_DIR"
-echo '[Seat:*]' > "$LIGHTDM_AUTLOGIN_FILE"
-echo "autologin-user=$USERNAME" >> "$LIGHTDM_AUTLOGIN_FILE"
-echo 'autologin-user-timeout=0' >> "$LIGHTDM_AUTLOGIN_FILE"
-echo 'user-session=openbox' >> "$LIGHTDM_AUTLOGIN_FILE"
-echo 'autologin-session=openbox' >> "$LIGHTDM_AUTLOGIN_FILE"
-
-mkdir -p /usr/share/xsessions
-if [ ! -f /usr/share/xsessions/openbox.desktop ]; then
-  cat > /usr/share/xsessions/openbox.desktop << 'EOF'
-[Desktop Entry]
-Name=Openbox
-Comment=Openbox window manager
-Exec=openbox-session
-TryExec=openbox-session
-Type=XSession
-EOF
-fi
-
-systemctl enable lightdm
-systemctl set-default graphical.target
-
-echo ""
-echo "LightDM autologin configured."
-echo ""
-echo "====== Configuring Kiosk Power Controls ======"
-echo ""
-
-mkdir -p "$(dirname "$POWER_POLICY_FILE")"
-cat > "$POWER_POLICY_FILE" << EOF
-polkit.addRule(function(action, subject) {
-  var allowedActions = [
-    "org.freedesktop.login1.reboot",
-    "org.freedesktop.login1.reboot-multiple-sessions",
-    "org.freedesktop.login1.power-off",
-    "org.freedesktop.login1.power-off-multiple-sessions"
-  ];
-  if (subject.user === "$USERNAME" && allowedActions.indexOf(action.id) !== -1) {
-    return polkit.Result.YES;
-  }
-});
-EOF
-chmod 644 "$POWER_POLICY_FILE"
-
-echo "Raspberry Pi restart and shutdown controls configured for '$USERNAME'."
-echo ""
-echo "====== Processing Pi Configuration Special Triggers ======"
-echo ""
-
-sed -i 's/console=tty1/console=tty3/' "$BOOT_CMDLINE_FILE"
-ensure_cmdline_arg "$BOOT_CMDLINE_FILE" quiet
-ensure_cmdline_arg "$BOOT_CMDLINE_FILE" splash
-ensure_cmdline_arg "$BOOT_CMDLINE_FILE" plymouth.ignore-serial-consoles
-ensure_cmdline_arg "$BOOT_CMDLINE_FILE" logo.nologo
-ensure_cmdline_arg "$BOOT_CMDLINE_FILE" loglevel=3
-ensure_cmdline_arg "$BOOT_CMDLINE_FILE" vt.global_cursor_default=0
-
-raspi-config nonint do_boot_splash 0
-raspi-config nonint do_boot_behaviour B4
-
-if grep -Fqx 'dtoverlay=vc4-fkms-v3d' "$BOOT_CONFIG_FILE"; then
-  sed -i 's/^dtoverlay=vc4-fkms-v3d$/dtoverlay=vc4-kms-v3d/' "$BOOT_CONFIG_FILE"
-else
-  ensure_config_line "$BOOT_CONFIG_FILE" 'dtoverlay=vc4-kms-v3d'
-fi
-
-if grep -Eq '^disable_splash=' "$BOOT_CONFIG_FILE"; then
-  sed -i 's/^disable_splash=.*/disable_splash=1/' "$BOOT_CONFIG_FILE"
-else
-  ensure_config_line "$BOOT_CONFIG_FILE" 'disable_splash=1'
-fi
-
-echo 'vsync = true;' > "$PICOM_CONF"
-echo 'backend = "glx";' >> "$PICOM_CONF"
-echo 'fading = false;' >> "$PICOM_CONF"
-echo "shadow-exclude = [ \"name = 'cursor'\" ];" >> "$PICOM_CONF"
-
-update-initramfs -u
-chown -R "$USERNAME:$USERNAME" "$CONFIG_DIR"
-
-echo ""
-echo "Configuration triggers complete."
-echo ""
-echo "====== Installing and Configuring Display and Touch Screen Drivers ======"
-echo ""
-
-if [ "$DISPLAY_TYPE" = "dsi" ]; then
-  echo "Configuring for a native DSI touchscreen on Raspberry Pi OS Lite x64 Trixie."
-  echo "No third-party display driver installation is required."
-
-  apt install -y libinput-tools
-  rm -f "$CALIBRATION_FILE"
-
-  if ! grep -Eq '^display_auto_detect=1$' "$BOOT_CONFIG_FILE"; then
-    ensure_config_line "$BOOT_CONFIG_FILE" 'display_auto_detect=1'
+ensure_node_version() {
+  local installed_major=""
+  if command -v node >/dev/null 2>&1; then
+    installed_major="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
+  fi
+  if [ "$installed_major" = "$NODE_MAJOR" ]; then
+    echo "Node.js $(node --version) already matches pinned major $NODE_MAJOR."
+    return
   fi
 
-  if ! grep -Eq '^dtoverlay=vc4-kms-v3d$' "$BOOT_CONFIG_FILE"; then
-    ensure_config_line "$BOOT_CONFIG_FILE" 'dtoverlay=vc4-kms-v3d'
+  log_section "Installing pinned Node.js major $NODE_MAJOR"
+  npm install --global "n@$N_VERSION"
+  n "$NODE_MAJOR"
+  hash -r
+  [ "$(node --version | sed -E 's/^v([0-9]+).*/\1/')" = "$NODE_MAJOR" ] \
+    || die "Node.js major $NODE_MAJOR was not installed successfully."
+}
+
+require_checkout() {
+  [ -d "$APP_DIR/.git" ] || die "No checkout exists at $APP_DIR. Run install first."
+}
+
+assert_clean_checkout() {
+  [ -z "$(run_as_user git -C "$APP_DIR" status --porcelain)" ] \
+    || die "The checkout at $APP_DIR has local changes. Preserve or commit them before updating."
+}
+
+sync_checkout() {
+  log_section "Synchronizing application checkout"
+  if [ -d "$APP_DIR/.git" ]; then
+    assert_clean_checkout
+    run_as_user git -C "$APP_DIR" pull --ff-only
+  else
+    install -d -o "$TARGET_USER" -g "$TARGET_GROUP" "$USER_HOME"
+    run_as_user git clone "$REPOSITORY_URL" "$APP_DIR"
+  fi
+}
+
+install_dependencies() {
+  log_section "Installing reproducible application dependencies"
+  require_checkout
+  local npm_path
+  npm_path="$(command -v npm)"
+  run_as_user "$npm_path" --prefix "$APP_DIR" ci
+}
+
+configure_environment() {
+  install -d -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0755 "$CONFIG_DIR"
+  if [ ! -f "$APP_ENV_FILE" ]; then
+    install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0600 "$APP_DIR/.env.example" "$APP_ENV_FILE"
+    echo "Created $APP_ENV_FILE. Review its MQTT settings before production use."
+  else
+    chown "$TARGET_USER:$TARGET_GROUP" "$APP_ENV_FILE"
+    chmod 0600 "$APP_ENV_FILE"
+  fi
+}
+
+configure_power_policy() {
+  log_section "Configuring kiosk power controls"
+  sed "s/@AIRCON_USER@/$TARGET_USER/g" \
+    "$SCRIPT_DIR/deploy/49-aircon-control-power.rules.in" > "$TEMP_DIR/49-aircon-control-power.rules"
+  install_managed_file \
+    "$TEMP_DIR/49-aircon-control-power.rules" \
+    "$POWER_POLICY_FILE" \
+    0644 root root
+  sleep 1
+}
+
+configure_session() {
+  log_section "Configuring supervised X11 kiosk session"
+  install -d -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0755 "$OPENBOX_DIR" "$USER_SYSTEMD_DIR"
+  install_managed_file "$SCRIPT_DIR/deploy/openbox-autostart" "$AUTOSTART_FILE" 0755 "$TARGET_USER" "$TARGET_GROUP"
+  install_managed_file "$SCRIPT_DIR/deploy/xsession" "$XSESSION_FILE" 0755 "$TARGET_USER" "$TARGET_GROUP"
+  install_managed_file "$SCRIPT_DIR/deploy/aircon-control.service" "$USER_SERVICE_FILE" 0644 "$TARGET_USER" "$TARGET_GROUP"
+  install_managed_file "$SCRIPT_DIR/deploy/openbox.desktop" "$OPENBOX_SESSION_FILE" 0644 root root
+
+  sed "s/@AIRCON_USER@/$TARGET_USER/g" \
+    "$SCRIPT_DIR/deploy/99-aircon-autologin.conf.in" > "$TEMP_DIR/99-aircon-autologin.conf"
+  install_managed_file "$TEMP_DIR/99-aircon-autologin.conf" "$LIGHTDM_AUTLOGIN_FILE" 0644 root root
+  systemctl enable lightdm
+  systemctl set-default graphical.target
+}
+
+configure_boot_and_display() {
+  log_section "Configuring boot and $DISPLAY_TYPE display"
+  local boot_config_file boot_cmdline_file
+  boot_config_file="$(detect_boot_config_file)"
+  boot_cmdline_file="$(detect_boot_cmdline_file)"
+  [ -f "$boot_config_file" ] || die "Boot config was not found at $boot_config_file."
+  [ -f "$boot_cmdline_file" ] || die "Boot command line was not found at $boot_cmdline_file."
+  backup_file "$boot_config_file"
+  backup_file "$boot_cmdline_file"
+
+  sed -i 's/console=tty1/console=tty3/' "$boot_cmdline_file"
+  ensure_cmdline_arg "$boot_cmdline_file" quiet
+  ensure_cmdline_arg "$boot_cmdline_file" splash
+  ensure_cmdline_arg "$boot_cmdline_file" plymouth.ignore-serial-consoles
+  ensure_cmdline_arg "$boot_cmdline_file" logo.nologo
+  ensure_cmdline_arg "$boot_cmdline_file" loglevel=3
+  ensure_cmdline_arg "$boot_cmdline_file" vt.global_cursor_default=0
+
+  raspi-config nonint do_boot_splash 0
+  raspi-config nonint do_boot_behaviour B4
+  if grep -Fqx 'dtoverlay=vc4-fkms-v3d' "$boot_config_file"; then
+    sed -i 's/^dtoverlay=vc4-fkms-v3d$/dtoverlay=vc4-kms-v3d/' "$boot_config_file"
+  else
+    ensure_config_line "$boot_config_file" 'dtoverlay=vc4-kms-v3d'
+  fi
+  if grep -Eq '^disable_splash=' "$boot_config_file"; then
+    sed -i 's/^disable_splash=.*/disable_splash=1/' "$boot_config_file"
+  else
+    ensure_config_line "$boot_config_file" 'disable_splash=1'
   fi
 
-  echo "DSI display path configured. The panel should be detected natively after reboot."
-else
-  echo "Configuring legacy SPI display support."
-  cd "/home/$USERNAME"
-  if [ ! -d "$LCD_SHOW_DIR/.git" ]; then
-    git clone https://github.com/goodtft/LCD-show.git "$LCD_SHOW_DIR"
+  if [ "$DISPLAY_TYPE" = dsi ]; then
+    apt install -y libinput-tools
+    backup_file "$CALIBRATION_FILE"
+    rm -f -- "$CALIBRATION_FILE"
+    ensure_config_line "$boot_config_file" 'display_auto_detect=1'
+  else
+    install -d -o "$TARGET_USER" -g "$TARGET_GROUP" "$USER_HOME"
+    if [ ! -d "$LCD_SHOW_DIR/.git" ]; then
+      run_as_user git clone https://github.com/goodtft/LCD-show.git "$LCD_SHOW_DIR"
+    fi
+    chmod -R 0755 "$LCD_SHOW_DIR"
+    sed -i -e 's/sudo reboot//' "$LCD_SHOW_DIR/LCD35-show"
+    (cd "$LCD_SHOW_DIR" && ./LCD35-show)
+    cp "$LCD_SHOW_DIR/xinput-calibrator_0.7.5-1_armhf.deb" "$USER_HOME/"
+    apt install -y libc6 libgcc1 libstdc++6 libx11-6 libxext6 libxi6
+    dpkg -i -B "$USER_HOME/xinput-calibrator_0.7.5-1_armhf.deb"
+    backup_file "$CALIBRATION_FILE"
+    install -D -m 0644 "$SCRIPT_DIR/deploy/99-calibration.conf" "$CALIBRATION_FILE"
+    sed -i -e 's/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=90,speed=24000000,fps=60/' "$boot_config_file"
+  fi
+  update-initramfs -u
+}
+
+terminate_matching_processes() {
+  local pattern="$1"
+  local label="$2"
+  local -a pids=()
+  mapfile -t pids < <(pgrep -u "$TARGET_UID" -f "$pattern" || true)
+  ((${#pids[@]})) || return 0
+  echo "Stopping legacy $label process(es): ${pids[*]}"
+  kill -TERM "${pids[@]}" 2>/dev/null || true
+  for _attempt in {1..20}; do
+    local -a remaining=()
+    for pid in "${pids[@]}"; do
+      kill -0 "$pid" 2>/dev/null && remaining+=("$pid")
+    done
+    ((${#remaining[@]} == 0)) && return 0
+    pids=("${remaining[@]}")
+    sleep 0.5
+  done
+  echo "Legacy $label did not stop gracefully; forcing only: ${pids[*]}"
+  kill -KILL "${pids[@]}" 2>/dev/null || true
+}
+
+stop_running_app() {
+  if ! user_systemctl_available; then
+    return
   fi
 
-  chmod -R 755 "$LCD_SHOW_DIR"
-  cd "$LCD_SHOW_DIR"
-  sed -i -e 's/sudo reboot//' LCD35-show
-  ./LCD35-show
+  user_systemctl stop aircon-control.service >/dev/null 2>&1 || true
+  terminate_matching_processes "^(sh|bash) $AUTOSTART_FILE$" "Openbox restart loop"
+  terminate_matching_processes "^node $APP_DIR/node_modules/\.bin/electron \. *$" "Electron launcher"
+  terminate_matching_processes "^$APP_DIR/node_modules/electron/dist/electron \. *$" "Electron main"
+}
 
-  cd "/home/$USERNAME"
-  cp "$LCD_SHOW_DIR/xinput-calibrator_0.7.5-1_armhf.deb" "/home/$USERNAME"
-  apt install -y libc6 libgcc1 libstdc++6 libx11-6 libxext6 libxi6
-  dpkg -i -B xinput-calibrator_0.7.5-1_armhf.deb
+restart_supervised_app() {
+  log_section "Starting supervised application"
+  if ! user_systemctl_available; then
+    echo "No active user session bus exists for $TARGET_USER; Openbox will start the service at the next graphical login."
+    return
+  fi
 
-  echo 'Section "InputClass"' > "$CALIBRATION_FILE"
-  echo '        Identifier "calibration"' >> "$CALIBRATION_FILE"
-  echo '        MatchProduct "ADS7846 Touchscreen"' >> "$CALIBRATION_FILE"
-  echo '        Option "Calibration" "2715 2684 2979 2964"' >> "$CALIBRATION_FILE"
-  echo '        Option "SwapAxes" "0"' >> "$CALIBRATION_FILE"
-  echo 'EndSection' >> "$CALIBRATION_FILE"
+  user_systemctl daemon-reload
+  user_systemctl restart aircon-control.service
+}
 
-  sed -i -e 's/dtoverlay=tft35a:rotate=90/dtoverlay=tft35a:rotate=90,speed=24000000,fps=60/' "$BOOT_CONFIG_FILE"
-fi
+power_capability() {
+  local method="$1"
+  runuser -u "$TARGET_USER" -- busctl call \
+    org.freedesktop.login1 \
+    /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager \
+    "$method" 2>/dev/null | sed -E 's/^s "(.*)"$/\1/' || echo unavailable
+}
 
-echo ""
-echo "  ---- Display and touch screen drivers installed and configured. ----"
-echo ""
-echo "====== Installing Thermostat Application ======"
-echo ""
+health_report() {
+  local renderer_command=""
+  log_section "Installation health report"
+  echo "User: $TARGET_USER ($TARGET_UID)"
+  echo "App directory: $APP_DIR"
+  if [ -r /proc/device-tree/model ]; then
+    echo "Hardware: $(tr -d '\0' < /proc/device-tree/model)"
+  else
+    echo "Hardware: not reported by device tree"
+  fi
+  if [ -d "$APP_DIR/.git" ]; then
+    echo "Git revision: $(run_as_user git -C "$APP_DIR" rev-parse --short HEAD)"
+    echo "Checkout clean: $([ -z "$(run_as_user git -C "$APP_DIR" status --porcelain)" ] && echo yes || echo no)"
+  fi
+  command -v node >/dev/null 2>&1 && echo "Node.js: $(node --version)"
+  command -v npm >/dev/null 2>&1 && echo "npm: $(npm --version) ($(command -v npm))"
+  if [ -f "$APP_DIR/node_modules/electron/package.json" ]; then
+    echo "Electron: $(node -p "require('$APP_DIR/node_modules/electron/package.json').version")"
+  fi
+  if [ -f "$APP_DIR/system-power.js" ]; then
+    echo "Raspberry Pi detected by app: $(run_as_user node -p "require('$APP_DIR/system-power').isRaspberryPi()")"
+  fi
+  if user_systemctl_available && [ -f "$USER_SERVICE_FILE" ]; then
+    echo "Application service: $(user_systemctl is-active aircon-control.service 2>/dev/null || true)"
+  else
+    echo "Application service: waiting for graphical login"
+  fi
+  renderer_command="$(pgrep -u "$TARGET_UID" -af -- '--type=renderer' | head -n 1 || true)"
+  if [ -n "$renderer_command" ]; then
+    echo "Renderer Pi capability flag: $([[ "$renderer_command" == *--raspberry-pi* ]] && echo yes || echo no)"
+  else
+    echo "Renderer Pi capability flag: renderer not running"
+  fi
+  command -v systemctl >/dev/null 2>&1 && echo "LightDM enabled: $(systemctl is-enabled lightdm 2>/dev/null || true)"
+  if [ -f "$POWER_POLICY_FILE" ]; then
+    echo "Reboot authorization: $(power_capability CanReboot)"
+    echo "Power-off authorization: $(power_capability CanPowerOff)"
+  fi
+  if [ -d "$BACKUP_DIR" ]; then
+    echo "Backups: $BACKUP_DIR"
+  fi
+  echo "Managed file ownership:"
+  for managed_file in "$APP_ENV_FILE" "$AUTOSTART_FILE" "$XSESSION_FILE" "$USER_SERVICE_FILE" "$POWER_POLICY_FILE"; do
+    [ -e "$managed_file" ] && stat -c '  %U:%G %a %n' "$managed_file"
+  done
+}
 
-cd "/home/$USERNAME"
-if [ -d "$APP_DIR/.git" ]; then
-  git -C "$APP_DIR" pull --ff-only
-else
-  git clone https://github.com/EthyMoney/AirConControl-Electron-MINI.git "$APP_DIR"
-fi
+run_install() {
+  install_required_packages
+  ensure_node_version
+  sync_checkout
+  stop_running_app
+  install_dependencies
+  configure_environment
+  configure_session
+  configure_power_policy
+  configure_boot_and_display
+  log_section "Installing boot splash"
+  DISPLAY_TYPE="$DISPLAY_TYPE" bash "$APP_DIR/plymouth/install-theme.sh"
+  restart_supervised_app
+  health_report
+  if $REBOOT_AFTER; then
+    systemctl reboot
+  else
+    echo "Full provisioning completed. Reboot when convenient to apply boot/display changes."
+  fi
+}
 
-cd "$APP_DIR"
-/usr/local/bin/npm install
-chown -R "$USERNAME:$USERNAME" "$APP_DIR"
+run_update() {
+  require_checkout
+  [ -f "$USER_SERVICE_FILE" ] || die "The supervised service is not installed. Run repair once before using update."
+  sync_checkout
+  stop_running_app
+  install_dependencies
+  restart_supervised_app
+  health_report
+}
 
-if [ ! -f "$APP_ENV_FILE" ]; then
-  cp "$APP_DIR/.env.example" "$APP_ENV_FILE"
-fi
-chown "$USERNAME:$USERNAME" "$APP_ENV_FILE"
-chmod 600 "$APP_ENV_FILE"
+run_repair() {
+  require_checkout
+  install_required_packages
+  ensure_node_version
+  stop_running_app
+  chown -R "$TARGET_USER:$TARGET_GROUP" "$APP_DIR"
+  install_dependencies
+  configure_environment
+  configure_session
+  configure_power_policy
+  restart_supervised_app
+  health_report
+  echo "Repair completed without changing boot files, display drivers, or Plymouth."
+}
 
-echo ""
-echo "====== Installing Shop Climate Control Boot Splash ======"
-echo ""
-
-DISPLAY_TYPE="$DISPLAY_TYPE" bash "$APP_DIR/plymouth/install-theme.sh"
-
-echo ""
-echo "  ---- Thermostat application installed. ----"
-echo ""
-
-read -p "All done! Would you like to reboot now? (You'll need to before this all works anyways) [Y/n] " -n 1 -r
-echo ""
-REPLY=${REPLY:-Y}
-
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-  reboot
-fi
+case "$MODE" in
+  install) run_install ;;
+  update) run_update ;;
+  repair) run_repair ;;
+  configure-power)
+    configure_power_policy
+    health_report
+    ;;
+esac

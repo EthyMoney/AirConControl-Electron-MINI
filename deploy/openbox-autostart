@@ -1,0 +1,11 @@
+#!/bin/bash
+
+xset s off
+xset -dpms
+xset s noblank
+xsetroot -solid '#080d12'
+
+# Openbox supplies the live X11 session environment. systemd supervises the app
+# after this one-time handoff and keeps its logs in the user journal.
+systemctl --user import-environment DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
+systemctl --user start --no-block aircon-control.service

@@ -1,0 +1,20 @@
+[Unit]
+Description=AirConControl Electron kiosk
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/AirConControl-Electron-MINI
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+EnvironmentFile=-%h/.config/aircon-control.env
+ExecStart=/usr/bin/env npm start
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+SyslogIdentifier=aircon-control
+
+[Install]
+WantedBy=default.target
