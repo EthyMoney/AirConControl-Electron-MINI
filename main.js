@@ -22,12 +22,15 @@ const {
 } = require('./config');
 const { HomeAssistantLease } = require('./home-assistant-lease');
 const { MqttController } = require('./mqtt-controller');
+const { isRaspberryPi, requestSystemPower } = require('./system-power');
 
 let mainWindow = null;
 let mqttController = null;
 let homeAssistantLease = null;
 let shutdownStarted = false;
 let shutdownComplete = false;
+let systemPowerRequested = false;
+const raspberryPi = isRaspberryPi();
 
 function getInstanceSuffix() {
   return `${AIRCON_INSTANCE_ID}_${process.pid}`;
@@ -58,6 +61,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       additionalArguments: [
         ...(DESKTOP_MODE ? ['--desktop'] : []),
+        ...(raspberryPi ? ['--raspberry-pi'] : []),
         `--set-temp-min=${MIN_SET_TEMPERATURE}`,
         `--set-temp-max=${MAX_SET_TEMPERATURE}`
       ],
@@ -95,6 +99,25 @@ ipcMain.handle('aircon:get-state', () => requireController().getSnapshot());
 ipcMain.handle('aircon:send-command', (_event, command) => requireController().sendCommand(command));
 ipcMain.handle('aircon:request-status', () => requireController().requestStatus());
 ipcMain.handle('aircon:get-runtime-report', () => requireController().getRuntimeReport());
+ipcMain.handle('system:power', async (_event, action) => {
+  if (!raspberryPi) {
+    return { ok: false, error: 'System power controls are only available on a Raspberry Pi' };
+  }
+  if (systemPowerRequested) {
+    return { ok: false, error: 'A system power action is already in progress' };
+  }
+
+  systemPowerRequested = true;
+  try {
+    await requireController().flushRuntimeState();
+    await requestSystemPower(action);
+    return { ok: true };
+  } catch (error) {
+    systemPowerRequested = false;
+    console.error(`Failed to perform system power action '${action}':`, error);
+    return { ok: false, error: error.message };
+  }
+});
 
 app.whenReady().then(async () => {
   const runtimeDataPath = path.join(app.getPath('userData'), 'cooling-runtime-report.json');

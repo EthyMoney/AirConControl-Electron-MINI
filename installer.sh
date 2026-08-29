@@ -14,6 +14,7 @@ LIGHTDM_CONF_DIR="/etc/lightdm/lightdm.conf.d"
 LIGHTDM_AUTLOGIN_FILE="$LIGHTDM_CONF_DIR/99-aircon-autologin.conf"
 CALIBRATION_FILE="/etc/X11/xorg.conf.d/99-calibration.conf"
 LCD_SHOW_DIR="/home/$USERNAME/LCD-show"
+POWER_POLICY_FILE="/etc/polkit-1/rules.d/49-aircon-control-power.rules"
 
 detect_boot_config_file() {
   if [ -f /boot/firmware/config.txt ]; then
@@ -93,7 +94,7 @@ echo "====== Installing APT Packages ======"
 echo ""
 
 apt install -y \
-  vnstat neofetch git lightdm picom net-tools plymouth plymouth-label \
+  vnstat neofetch git lightdm picom net-tools polkitd plymouth plymouth-label \
   xserver-xorg xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all xserver-xorg-input-libinput \
   xinit x11-xserver-utils openbox npm wavemon \
   libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libdrm2 libgbm1 libasound2 libxkbcommon0 libxshmfence1
@@ -173,6 +174,27 @@ systemctl set-default graphical.target
 
 echo ""
 echo "LightDM autologin configured."
+echo ""
+echo "====== Configuring Kiosk Power Controls ======"
+echo ""
+
+mkdir -p "$(dirname "$POWER_POLICY_FILE")"
+cat > "$POWER_POLICY_FILE" << EOF
+polkit.addRule(function(action, subject) {
+  var allowedActions = [
+    "org.freedesktop.login1.reboot",
+    "org.freedesktop.login1.reboot-multiple-sessions",
+    "org.freedesktop.login1.power-off",
+    "org.freedesktop.login1.power-off-multiple-sessions"
+  ];
+  if (subject.user === "$USERNAME" && allowedActions.indexOf(action.id) !== -1) {
+    return polkit.Result.YES;
+  }
+});
+EOF
+chmod 644 "$POWER_POLICY_FILE"
+
+echo "Raspberry Pi restart and shutdown controls configured for '$USERNAME'."
 echo ""
 echo "====== Processing Pi Configuration Special Triggers ======"
 echo ""

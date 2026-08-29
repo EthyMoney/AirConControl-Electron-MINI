@@ -10,6 +10,7 @@ function readNumericArgument(name, fallback) {
 
 contextBridge.exposeInMainWorld('airconApi', {
   desktopMode: process.argv.includes('--desktop'),
+  raspberryPi: process.argv.includes('--raspberry-pi'),
   setTemperatureRange: {
     min: readNumericArgument('set-temp-min', 50),
     max: readNumericArgument('set-temp-max', 90)
@@ -25,6 +26,9 @@ contextBridge.exposeInMainWorld('airconApi', {
   },
   getRuntimeReport() {
     return ipcRenderer.invoke('aircon:get-runtime-report');
+  },
+  requestSystemPower(action) {
+    return ipcRenderer.invoke('system:power', action);
   },
   onState(listener) {
     const wrapped = (_event, snapshot) => listener(snapshot);

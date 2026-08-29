@@ -1224,6 +1224,10 @@ class MqttController extends EventEmitter {
       .catch((error) => this.setHomeAssistantError(error.message));
   }
 
+  flushRuntimeState() {
+    return this.runtimeStore.flush();
+  }
+
   async stop() {
     this.clearCommandTimers();
     for (const timerProperty of ['airconFreshnessTimer', 'weatherFreshnessTimer']) {

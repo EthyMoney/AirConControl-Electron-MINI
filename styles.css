@@ -75,15 +75,44 @@ body {
   border-radius: 8px;
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
+  align-items: center;
   gap: 0;
-  padding: 6px 0;
+  min-height: 32px;
+  padding: 0;
   margin: 0;
   flex-shrink: 0;
+}
+
+.status-bar-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.system-power-button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 7px;
+  background-color: rgba(0, 0, 0, 0.28);
+  color: #ffffff;
+  font-family: "Segoe UI Symbol", "DejaVu Sans", sans-serif;
+  font-size: 21px;
+  line-height: 1;
 }
 
 .light-mode .status-bar {
   background-color: #ffffff;
   color: black;
+}
+
+.light-mode .system-power-button {
+  border-color: rgba(0, 0, 0, 0.24);
+  background-color: #e2e6e9;
+  color: #8b2020;
 }
 
 .status-bar div {
@@ -104,6 +133,86 @@ body {
 #outside-humidity {
   font-weight: bold;
   text-align: right;
+}
+
+.system-power-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgba(0, 0, 0, 0.72);
+}
+
+.system-power-dialog.hidden {
+  display: none;
+}
+
+.system-power-card {
+  width: min(560px, 100%);
+  padding: 24px;
+  border: 1px solid #5c6770;
+  border-radius: 14px;
+  background-color: #22272c;
+  color: #ffffff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+
+.system-power-icon {
+  font-family: "Segoe UI Symbol", "DejaVu Sans", sans-serif;
+  font-size: 44px;
+  line-height: 1;
+  color: #ff7777;
+}
+
+.system-power-card h2 {
+  margin: 10px 0 6px;
+  font-size: 28px;
+}
+
+.system-power-card p {
+  min-height: 24px;
+  margin: 0 0 22px;
+  font-size: 17px;
+}
+
+.system-power-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.system-power-actions button {
+  min-height: 62px;
+  border: none;
+  border-radius: 9px;
+  background-color: #3b4650;
+  color: #ffffff;
+  font-size: 21px;
+  font-weight: bold;
+}
+
+.system-power-actions .system-shutdown-button {
+  background-color: #a52f2f;
+}
+
+.system-power-actions .system-power-cancel-button {
+  grid-column: 1 / -1;
+  min-height: 52px;
+  background-color: #59636c;
+}
+
+.system-power-actions button:disabled {
+  opacity: 0.5;
+}
+
+.light-mode .system-power-card {
+  border-color: #aeb7bf;
+  background-color: #ffffff;
+  color: #222222;
 }
 
 .title {

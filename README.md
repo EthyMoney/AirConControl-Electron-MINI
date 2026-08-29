@@ -198,6 +198,11 @@ to the kiosk user (`0600`), and loads it before each app start. Configure each P
 `AIRCON_INSTANCE_ID`, broker credentials, and TLS certificate paths there. Updates preserve this
 file.
 
+On Raspberry Pi hardware, a power icon appears beside the humidity reading. It opens large
+touchscreen actions for restarting or shutting down the Pi. The installer adds a narrowly scoped
+polkit rule so only the kiosk user can invoke those two system actions without an authentication
+prompt. The button stays hidden on desktop builds and non-Pi Linux systems.
+
 The native DSI display path is the default. For an older SPI display, use:
 
 ```bash

@@ -57,6 +57,12 @@ const powerOnButton = document.getElementById('powerOnButton');
 const powerOffButton = document.getElementById('powerOffButton');
 const tempDecreaseButton = document.getElementById('tempDecreaseButton');
 const tempIncreaseButton = document.getElementById('tempIncreaseButton');
+const systemPowerButton = document.getElementById('systemPowerButton');
+const systemPowerDialog = document.getElementById('systemPowerDialog');
+const systemPowerDialogMessage = document.getElementById('systemPowerDialogMessage');
+const systemRestartButton = document.getElementById('systemRestartButton');
+const systemShutdownButton = document.getElementById('systemShutdownButton');
+const systemPowerCancelButton = document.getElementById('systemPowerCancelButton');
 
 let latestState = null;
 let draftSetTemp = null;
@@ -64,6 +70,51 @@ let temperatureCommitTimeout = null;
 let runtimeReportCache = null;
 let selectedRuntimeReportDay = null;
 let localCommandError = null;
+let systemPowerPending = false;
+
+function setSystemPowerDialogOpen(open) {
+  if (systemPowerPending && !open) {
+    return;
+  }
+  const wasOpen = !systemPowerDialog.classList.contains('hidden');
+  systemPowerDialog.classList.toggle('hidden', !open);
+  systemPowerDialog.setAttribute('aria-hidden', String(!open));
+  if (open) {
+    systemPowerDialogMessage.textContent = 'Choose what you want the display to do.';
+    systemPowerCancelButton.textContent = 'Cancel';
+    systemPowerCancelButton.focus();
+  } else if (wasOpen && !systemPowerButton.classList.contains('hidden')) {
+    systemPowerButton.focus();
+  }
+}
+
+async function performSystemPowerAction(action) {
+  if (systemPowerPending) {
+    return;
+  }
+  systemPowerPending = true;
+  systemPowerDialogMessage.textContent = action === 'reboot'
+    ? 'Restarting Raspberry Pi…'
+    : 'Shutting down Raspberry Pi…';
+  systemRestartButton.disabled = true;
+  systemShutdownButton.disabled = true;
+  systemPowerCancelButton.disabled = true;
+
+  try {
+    const result = await window.airconApi.requestSystemPower(action);
+    if (!result?.ok) {
+      throw new Error(result?.error || `Unable to ${action} the Raspberry Pi`);
+    }
+  } catch (error) {
+    systemPowerPending = false;
+    systemPowerDialogMessage.textContent = error.message || `Unable to ${action} the Raspberry Pi`;
+    systemRestartButton.disabled = false;
+    systemShutdownButton.disabled = false;
+    systemPowerCancelButton.disabled = false;
+    systemPowerCancelButton.textContent = 'Close';
+    systemPowerCancelButton.focus();
+  }
+}
 
 function triggerValueChangeAnimation(element) {
   element.classList.remove('value-change');
@@ -818,6 +869,10 @@ function checkAndSetTheme() {
 
 powerOnButton.addEventListener('click', () => sendCommand('on'));
 powerOffButton.addEventListener('click', () => sendCommand('off'));
+systemPowerButton.addEventListener('click', () => setSystemPowerDialogOpen(true));
+systemPowerCancelButton.addEventListener('click', () => setSystemPowerDialogOpen(false));
+systemRestartButton.addEventListener('click', () => performSystemPowerAction('reboot'));
+systemShutdownButton.addEventListener('click', () => performSystemPowerAction('shutdown'));
 tempDecreaseButton.addEventListener('click', () => handleTemperatureChange(-1));
 tempIncreaseButton.addEventListener('click', () => handleTemperatureChange(1));
 statusRuntimeInfoButton.addEventListener('click', openRuntimeReport);
@@ -834,7 +889,10 @@ document.addEventListener('click', (event) => {
   }
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') setStatusDetailsExpanded(false);
+  if (event.key === 'Escape') {
+    setStatusDetailsExpanded(false);
+    setSystemPowerDialogOpen(false);
+  }
 });
 runtimeReportCloseButton.addEventListener('click', closeRuntimeReport);
 runtimeReportDayBackButton.addEventListener('click', closeRuntimeReportDay);
@@ -873,3 +931,5 @@ if (window.airconApi.desktopMode) {
   document.addEventListener('mousemove', () => { document.body.style.cursor = 'none'; });
   document.addEventListener('touchmove', () => { document.body.style.cursor = 'none'; });
 }
+
+systemPowerButton.classList.toggle('hidden', !window.airconApi.raspberryPi);

@@ -14,7 +14,10 @@
     <div class="status-bar">
       <div id="outside-temperature">waiting</div>
       <div id="current-time"></div>
-      <div id="outside-humidity">waiting</div>
+      <div class="status-bar-end">
+        <span id="outside-humidity">waiting</span>
+        <button class="system-power-button hidden" id="systemPowerButton" type="button" aria-label="Raspberry Pi power options" title="Raspberry Pi power options">&#x23FB;</button>
+      </div>
     </div>
     <h1 class="title">Shop Climate Control</h1>
 
@@ -86,6 +89,19 @@
     <div class="control-buttons">
       <button id="powerOnButton">Power On</button>
       <button id="powerOffButton">Power Off</button>
+    </div>
+
+    <div class="system-power-dialog hidden" id="systemPowerDialog" role="dialog" aria-modal="true" aria-labelledby="systemPowerDialogTitle" aria-hidden="true">
+      <div class="system-power-card">
+        <div class="system-power-icon" aria-hidden="true">&#x23FB;</div>
+        <h2 id="systemPowerDialogTitle">Raspberry Pi power</h2>
+        <p id="systemPowerDialogMessage">Choose what you want the display to do.</p>
+        <div class="system-power-actions">
+          <button id="systemRestartButton" type="button">Restart</button>
+          <button class="system-shutdown-button" id="systemShutdownButton" type="button">Shut down</button>
+          <button class="system-power-cancel-button" id="systemPowerCancelButton" type="button">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <div class="runtime-report-screen hidden" id="runtimeReportScreen">
