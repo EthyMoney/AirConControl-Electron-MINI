@@ -307,6 +307,40 @@ test('a pending guard cannot promote after the lease monitor disconnects', async
   await lease.stop();
 });
 
+test('repeated monitor reconnects rotate the MQTT client identity', async () => {
+  const broker = new FakeBroker();
+  const lease = createLease(broker, 'owner-one', 'display-one');
+  lease.start();
+  const monitor = broker.clients[0];
+  const initialClientId = monitor.options.clientId;
+
+  monitor.emit('reconnect');
+  monitor.emit('reconnect');
+  assert.equal(monitor.options.clientId, initialClientId);
+  monitor.emit('reconnect');
+
+  assert.notEqual(monitor.options.clientId, initialClientId);
+  assert.match(monitor.options.clientId, /^owner-one-client_recovery_/);
+  await new Promise((resolve) => setImmediate(resolve));
+  await lease.stop();
+});
+
+test('monitor disconnect preserves the specific MQTT error', async () => {
+  const broker = new FakeBroker();
+  const lease = createLease(broker, 'owner-one', 'display-one');
+  lease.start();
+  await once(lease, 'acquired');
+  const monitor = broker.clients.find((client) => !client.options.will);
+
+  monitor.emit('error', new Error('Connection refused: identifier rejected'));
+  monitor.connected = false;
+  monitor.emit('offline');
+
+  assert.equal(lease.getSnapshot().role, 'disconnected');
+  assert.equal(lease.getSnapshot().error, 'Connection refused: identifier rejected');
+  await lease.stop();
+});
+
 test('a pending guard cannot promote after its local lease expires', async () => {
   const broker = new FakeBroker();
   broker.guardConnectDelayMs = 70;

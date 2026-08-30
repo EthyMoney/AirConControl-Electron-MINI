@@ -156,10 +156,12 @@ app.whenReady().then(async () => {
   mqttController.start();
 
   if (HOME_ASSISTANT_DISCOVERY_ENABLED) {
+    const bridgeSessionId = randomUUID();
+    let lastLeaseError = null;
     homeAssistantLease = new HomeAssistantLease({
       brokerUrl: MQTT_BROKER_URL,
-      clientId: `${MQTT_CLIENT_ID}_${instanceSuffix}_lease`,
-      ownerId: `${instanceSuffix}_${randomUUID()}`,
+      clientId: `${MQTT_CLIENT_ID}_${instanceSuffix}_${bridgeSessionId}_lease`,
+      ownerId: `${instanceSuffix}_${bridgeSessionId}`,
       instanceId: AIRCON_INSTANCE_ID,
       hostname: os.hostname(),
       version: packageMetadata.version,
@@ -171,7 +173,15 @@ app.whenReady().then(async () => {
       eligible: mqttController.getSnapshot().mqtt.status === 'connected',
       leaseDurationMs: HOME_ASSISTANT_LEASE_DURATION_MS
     });
-    homeAssistantLease.on('state', (state) => mqttController.setHomeAssistantLeaseState(state));
+    homeAssistantLease.on('state', (state) => {
+      mqttController.setHomeAssistantLeaseState(state);
+      if (state.error && state.error !== lastLeaseError) {
+        console.error(`Home Assistant lease ${state.role}: ${state.error}`);
+      } else if (!state.error && lastLeaseError) {
+        console.log(`Home Assistant lease recovered as ${state.role}.`);
+      }
+      lastLeaseError = state.error;
+    });
     homeAssistantLease.on('acquired', () => {
       mqttController.setHomeAssistantEnabled(true)
         .catch(async (error) => {

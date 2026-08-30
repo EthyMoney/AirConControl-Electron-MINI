@@ -1,4 +1,5 @@
 const { EventEmitter } = require('events');
+const { randomUUID } = require('crypto');
 const mqtt = require('mqtt');
 
 function parseLease(message, now) {
@@ -27,6 +28,8 @@ class HomeAssistantLease extends EventEmitter {
       contentionMs: 500,
       settleMs: 250,
       connectTimeoutMs: 5000,
+      clientIdRotationAttempts: 3,
+      monitorStableMs: 15000,
       ...options
     };
     this.client = null;
@@ -40,6 +43,9 @@ class HomeAssistantLease extends EventEmitter {
     this.heartbeat = null;
     this.eligibilityTransition = Promise.resolve();
     this.electionNotBefore = 0;
+    this.monitorClientId = options.clientId;
+    this.monitorReconnectAttempts = 0;
+    this.monitorStableTimer = null;
     this.state = {
       role: 'starting',
       ownerId: null,
@@ -73,22 +79,46 @@ class HomeAssistantLease extends EventEmitter {
     return options;
   }
 
+  handleMonitorReconnect() {
+    this.monitorReconnectAttempts += 1;
+    let error = this.state.error;
+    if (this.monitorReconnectAttempts >= this.options.clientIdRotationAttempts) {
+      // A broker-side client takeover can leave MQTT.js reconnecting forever with the same
+      // deterministic ID. Rotate it in place so the next CONNECT is a genuinely new session.
+      this.monitorClientId = `${this.options.clientId}_recovery_${randomUUID()}`;
+      this.client.options.clientId = this.monitorClientId;
+      this.monitorReconnectAttempts = 0;
+      error = 'Repeated bridge lease disconnects; retrying with a new MQTT client identity';
+    }
+    this.setState({ role: 'reconnecting', error });
+  }
+
+  scheduleMonitorStability() {
+    if (this.monitorStableTimer) clearTimeout(this.monitorStableTimer);
+    this.monitorStableTimer = setTimeout(() => {
+      this.monitorStableTimer = null;
+      this.monitorReconnectAttempts = 0;
+    }, this.options.monitorStableMs);
+    this.monitorStableTimer.unref?.();
+  }
+
   start() {
     if (this.client) return;
     this.stopped = false;
     this.client = this.options.mqttLibrary.connect(
       this.options.brokerUrl,
-      this.createConnectOptions(this.options.clientId)
+      this.createConnectOptions(this.monitorClientId)
     );
     this.client.on('connect', () => this.observe());
     this.client.on('message', (topic, payload, packet) => this.handleMessage(topic, payload.toString(), packet));
-    this.client.on('reconnect', () => this.setState({ role: 'reconnecting' }));
+    this.client.on('reconnect', () => this.handleMonitorReconnect());
     this.client.on('offline', () => this.handleMonitorLoss('Bridge lease connection is offline'));
     this.client.on('close', () => this.handleMonitorLoss('Bridge lease connection closed'));
     this.client.on('error', (error) => this.setState({ error: error.message }));
   }
 
   observe() {
+    this.scheduleMonitorStability();
     this.setState({ role: this.eligible ? 'observing' : 'waiting-for-mqtt', error: null });
     this.client.subscribe(this.options.topic, { qos: 1 }, (error) => {
       if (error) {
@@ -217,7 +247,7 @@ class HomeAssistantLease extends EventEmitter {
     this.closingGuard = false;
     const guard = this.options.mqttLibrary.connect(
       this.options.brokerUrl,
-      this.createConnectOptions(`${this.options.clientId}_guard`, {
+      this.createConnectOptions(`${this.monitorClientId}_guard`, {
         topic: this.options.availabilityTopic,
         payload: 'offline',
         qos: 1,
@@ -291,13 +321,16 @@ class HomeAssistantLease extends EventEmitter {
 
   handleMonitorLoss(reason) {
     if (this.stopped) return;
+    if (this.monitorStableTimer) clearTimeout(this.monitorStableTimer);
+    this.monitorStableTimer = null;
+    const error = this.state.error || reason;
     this.clearTimers();
     if (this.leader) {
-      this.loseLeadership(reason);
+      this.loseLeadership(error);
     } else if (this.guardClient) {
       void this.closeGuard(false);
     }
-    this.setState({ role: 'disconnected', error: reason });
+    this.setState({ role: 'disconnected', error });
   }
 
   loseLeadership(reason) {
@@ -412,6 +445,8 @@ class HomeAssistantLease extends EventEmitter {
     this.eligible = false;
     await this.eligibilityTransition.catch(() => {});
     this.clearTimers();
+    if (this.monitorStableTimer) clearTimeout(this.monitorStableTimer);
+    this.monitorStableTimer = null;
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.leader = false;

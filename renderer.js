@@ -404,7 +404,8 @@ function renderState() {
     : aircon.receivedAt
       ? `Telemetry ${aircon.freshness}; updated ${formatAge(aircon.receivedAt)}`
       : 'Telemetry waiting for first status';
-  const homeAssistantLabel = `Home Assistant ${homeAssistant?.role || 'disabled'}; owner ${homeAssistant?.ownerInstanceId || 'none'}; lease ${leaseExpiry}`;
+  const homeAssistantError = homeAssistant?.error ? `; ${homeAssistant.error}` : '';
+  const homeAssistantLabel = `Home Assistant ${homeAssistant?.role || 'disabled'}; owner ${homeAssistant?.ownerInstanceId || 'none'}; lease ${leaseExpiry}${homeAssistantError}`;
   const runtimeLabel = `Runtime history ${runtimeSync?.status || 'local'}; source ${runtimeSync?.sourceInstanceId || 'local'}`;
   const storageLabel = storage.error ? `Storage ${storage.status}: ${storage.error}` : `Storage ${storage.status}`;
 
