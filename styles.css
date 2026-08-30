@@ -828,7 +828,7 @@ body {
   padding: 16px;
   box-shadow: 0 4px 8px black;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   grid-template-columns: auto 1fr auto;
   gap: 12px;
   align-items: center;
@@ -860,8 +860,10 @@ body {
 
 .temperature-buttons button {
   font-size: 48px;
-  width: 90px;
-  height: 90px;
+  width: auto;
+  height: 100%;
+  max-height: 90px;
+  aspect-ratio: 1;
   font-weight: bolder;
   border-radius: 50%;
   background-color: #333333;
@@ -873,6 +875,7 @@ body {
   margin: 0;
   flex-shrink: 0;
   grid-row: 2;
+  justify-self: center;
 }
 
 .temperature-buttons button:first-child {
