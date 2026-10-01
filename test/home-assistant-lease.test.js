@@ -10,6 +10,7 @@ class FakeBroker {
     this.guardConnectDelayMs = 0;
     this.guardEndDelayMs = 0;
     this.failNextGuard = false;
+    this.published = [];
   }
 
   connect(_url, options) {
@@ -29,6 +30,7 @@ class FakeBroker {
   }
 
   publish(topic, message, options, callback) {
+    this.published.push({ topic, message, options });
     if (options.retain) {
       if (message) this.retained.set(topic, message);
       else this.retained.delete(topic);
@@ -105,6 +107,8 @@ test('recognizes live, expired, and malformed retained leases', () => {
   assert.equal(parseLease(JSON.stringify({ ownerId: 'one', expiresAt: 500 }), 1000).active, false);
   assert.equal(parseLease('invalid', 1000).active, true);
   assert.equal(parseLease('', 1000), null);
+  const released = JSON.stringify({ ownerId: 'one', instanceId: 'display-one', released: true, expiresAt: 0 });
+  assert.equal(parseLease(released, 1000).active, false);
 });
 
 test('elects one bridge and keeps another network instance on standby', async () => {
@@ -307,7 +311,7 @@ test('a pending guard cannot promote after the lease monitor disconnects', async
   await lease.stop();
 });
 
-test('repeated monitor reconnects rotate the MQTT client identity', async () => {
+test('repeated monitor reconnects replace the MQTT client with a fresh identity', async () => {
   const broker = new FakeBroker();
   const lease = createLease(broker, 'owner-one', 'display-one');
   lease.start();
@@ -316,13 +320,73 @@ test('repeated monitor reconnects rotate the MQTT client identity', async () => 
 
   monitor.emit('reconnect');
   monitor.emit('reconnect');
-  assert.equal(monitor.options.clientId, initialClientId);
-  monitor.emit('reconnect');
-
-  assert.notEqual(monitor.options.clientId, initialClientId);
-  assert.match(monitor.options.clientId, /^owner-one-client_recovery_/);
   await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(broker.clients.filter((client) => !client.options.will).length, 1);
+  monitor.emit('reconnect');
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const monitors = broker.clients.filter((client) => !client.options.will);
+  assert.equal(monitors.length, 2);
+  assert.equal(monitor.endForce, true, 'the old client is force-ended so its queues are discarded');
+  assert.equal(monitor.options.clientId, initialClientId, 'the old client is not renamed in place');
+  assert.match(monitors[1].options.clientId, /^owner-one-client_recovery_/);
   await lease.stop();
+});
+
+test('a monitor client that fails every reconnect is replaced and leadership recovers', async () => {
+  const broker = new FakeBroker();
+  const lease = createLease(broker, 'owner-one', 'display-one');
+  lease.start();
+  await once(lease, 'acquired');
+  const poisoned = broker.clients.find((client) => !client.options.will);
+
+  // What Electron on the Pi did for 11 days: every reconnect wrote the same queued packet,
+  // failed with EFAULT and closed again.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    poisoned.emit('error', new Error('write EFAULT'));
+    poisoned.connected = false;
+    poisoned.emit('close');
+    poisoned.emit('reconnect');
+  }
+  const reacquired = once(lease, 'acquired');
+  await new Promise((resolve) => setImmediate(resolve));
+  await reacquired;
+
+  assert.equal(lease.getSnapshot().role, 'leader');
+  assert.notEqual(lease.client, poisoned);
+  assert.equal(poisoned.endForce, true);
+  poisoned.emit('close');
+  assert.equal(lease.getSnapshot().role, 'leader', 'events from the replaced client are ignored');
+  await lease.stop();
+});
+
+test('releasing the lease never publishes an empty payload', async () => {
+  const broker = new FakeBroker();
+  const topic = 'airconcontrol/shop/bridge/owner';
+  const first = createLease(broker, 'owner-one', 'display-one');
+  const second = createLease(broker, 'owner-two', 'display-two');
+  first.start();
+  await once(first, 'acquired');
+  second.start();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  let acquired = once(second, 'acquired');
+  await first.yieldLeadership('Bridge setup failed');
+  await acquired;
+  acquired = once(first, 'acquired');
+  await second.setEligible(false);
+  await acquired;
+  await first.stop();
+  await second.stop();
+
+  const releases = broker.published.filter((entry) => entry.topic === topic && /"released":true/.test(entry.message));
+  assert.ok(releases.length >= 2, 'yield, eligibility loss and stop publish a release');
+  assert.deepEqual(broker.published.filter((entry) => entry.topic === topic && !entry.message), []);
+  for (const release of releases) {
+    assert.equal(parseLease(release.message, Date.now()).active, false);
+    assert.equal(release.options.retain, true);
+    assert.ok(release.options.properties.messageExpiryInterval > 0);
+  }
 });
 
 test('monitor disconnect preserves the specific MQTT error', async () => {

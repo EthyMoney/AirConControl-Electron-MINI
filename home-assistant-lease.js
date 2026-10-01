@@ -46,6 +46,8 @@ class HomeAssistantLease extends EventEmitter {
     this.monitorClientId = options.clientId;
     this.monitorReconnectAttempts = 0;
     this.monitorStableTimer = null;
+    this.monitorHandlers = {};
+    this.pendingMonitorReplacement = null;
     this.state = {
       role: 'starting',
       ownerId: null,
@@ -79,18 +81,37 @@ class HomeAssistantLease extends EventEmitter {
     return options;
   }
 
-  handleMonitorReconnect() {
+  handleMonitorReconnect(client) {
+    if (this.stopped || client !== this.client) return;
     this.monitorReconnectAttempts += 1;
-    let error = this.state.error;
-    if (this.monitorReconnectAttempts >= this.options.clientIdRotationAttempts) {
-      // A broker-side client takeover can leave MQTT.js reconnecting forever with the same
-      // deterministic ID. Rotate it in place so the next CONNECT is a genuinely new session.
-      this.monitorClientId = `${this.options.clientId}_recovery_${randomUUID()}`;
-      this.client.options.clientId = this.monitorClientId;
-      this.monitorReconnectAttempts = 0;
-      error = 'Repeated bridge lease disconnects; retrying with a new MQTT client identity';
+    if (this.monitorReconnectAttempts < this.options.clientIdRotationAttempts) {
+      this.setState({ role: 'reconnecting', error: this.state.error });
+      return;
     }
-    this.setState({ role: 'reconnecting', error });
+    // Renaming the client in place is not enough: MQTT.js keeps a client's queued and in-flight
+    // packets across reconnects and sends them first, so one unsendable packet fails every
+    // reconnect forever. Replace the client with a new one (new identity, empty queues).
+    // MQTT.js calls connect() right after emitting 'reconnect', so replace it on the next turn.
+    this.monitorReconnectAttempts = 0;
+    this.setState({
+      role: 'reconnecting',
+      error: 'Repeated bridge lease disconnects; reconnecting with a new MQTT client'
+    });
+    if (this.pendingMonitorReplacement) clearImmediate(this.pendingMonitorReplacement);
+    this.pendingMonitorReplacement = setImmediate(() => {
+      this.pendingMonitorReplacement = null;
+      this.replaceMonitorClient(client);
+    });
+  }
+
+  replaceMonitorClient(client) {
+    if (this.stopped || client !== this.client) return;
+    for (const [event, handler] of Object.entries(this.monitorHandlers)) client.removeListener(event, handler);
+    client.on('error', () => {});
+    client.end(true);
+    this.client = null;
+    this.monitorClientId = `${this.options.clientId}_recovery_${randomUUID()}`;
+    this.connectMonitor();
   }
 
   scheduleMonitorStability() {
@@ -105,19 +126,31 @@ class HomeAssistantLease extends EventEmitter {
   start() {
     if (this.client) return;
     this.stopped = false;
-    this.client = this.options.mqttLibrary.connect(
+    this.connectMonitor();
+  }
+
+  connectMonitor() {
+    const client = this.options.mqttLibrary.connect(
       this.options.brokerUrl,
       this.createConnectOptions(this.monitorClientId)
     );
-    this.client.on('connect', () => this.observe());
-    this.client.on('message', (topic, payload, packet) => this.handleMessage(topic, payload.toString(), packet));
-    this.client.on('reconnect', () => this.handleMonitorReconnect());
-    this.client.on('offline', () => this.handleMonitorLoss('Bridge lease connection is offline'));
-    this.client.on('close', () => this.handleMonitorLoss('Bridge lease connection closed'));
-    this.client.on('error', (error) => this.setState({ error: error.message }));
+    // Events from a client that has been replaced or stopped are ignored.
+    const current = () => client === this.client && !this.stopped;
+    const handlers = {
+      connect: () => { if (current()) this.observe(); },
+      message: (topic, payload, packet) => { if (current()) this.handleMessage(topic, payload.toString(), packet); },
+      reconnect: () => this.handleMonitorReconnect(client),
+      offline: () => { if (current()) this.handleMonitorLoss('Bridge lease connection is offline'); },
+      close: () => { if (current()) this.handleMonitorLoss('Bridge lease connection closed'); },
+      error: (error) => { if (current()) this.setState({ error: error.message }); }
+    };
+    for (const [event, handler] of Object.entries(handlers)) client.on(event, handler);
+    this.client = client;
+    this.monitorHandlers = handlers;
   }
 
   observe() {
+    if (this.stopped || !this.client) return;
     this.scheduleMonitorStability();
     this.setState({ role: this.eligible ? 'observing' : 'waiting-for-mqtt', error: null });
     this.client.subscribe(this.options.topic, { qos: 1 }, (error) => {
@@ -227,6 +260,30 @@ class HomeAssistantLease extends EventEmitter {
     });
   }
 
+  // A released lease is published as an already-expired lease, never as an empty retained message.
+  // Electron 43 on the Raspberry Pi (arm64) cannot write zero-length buffers: writev fails with
+  // EFAULT, and MQTT.js retries the unsent QoS 1 publish first after every reconnect, so a single
+  // empty release kept the lease client failing on every reconnect for days. parseLease() in every
+  // version treats a lease without leaseDurationMs whose expiresAt is in the past as inactive.
+  buildReleasePayload() {
+    return JSON.stringify({
+      ownerId: this.options.ownerId,
+      instanceId: this.options.instanceId,
+      hostname: this.options.hostname,
+      version: this.options.version,
+      released: true,
+      expiresAt: 0
+    });
+  }
+
+  publishRelease(callback = () => {}) {
+    this.client.publish(this.options.topic, this.buildReleasePayload(), {
+      qos: 1,
+      retain: true,
+      properties: { messageExpiryInterval: Math.ceil(this.options.leaseDurationMs / 1000) }
+    }, callback);
+  }
+
   publishLease(callback = () => {}) {
     this.client.publish(this.options.topic, this.buildPayload(), {
       qos: 1,
@@ -298,7 +355,7 @@ class HomeAssistantLease extends EventEmitter {
     this.heartbeat = null;
     if (this.currentLease?.ownerId === this.options.ownerId && this.client?.connected) {
       await new Promise((resolve) => {
-        this.client.publish(this.options.topic, '', { qos: 1, retain: true }, resolve);
+        this.publishRelease(resolve);
       });
       this.currentLease = null;
     }
@@ -387,7 +444,7 @@ class HomeAssistantLease extends EventEmitter {
     await this.closeGuard(true);
     if (this.currentLease?.ownerId === this.options.ownerId && this.client?.connected) {
       await new Promise((resolve) => {
-        this.client.publish(this.options.topic, '', { qos: 1, retain: true }, resolve);
+        this.publishRelease(resolve);
       });
       this.currentLease = null;
     }
@@ -420,7 +477,7 @@ class HomeAssistantLease extends EventEmitter {
     await this.closeGuard(true);
     if (this.currentLease?.ownerId === this.options.ownerId && this.client?.connected) {
       await new Promise((resolve) => {
-        this.client.publish(this.options.topic, '', { qos: 1, retain: true }, resolve);
+        this.publishRelease(resolve);
       });
     }
     this.currentLease = null;
@@ -443,6 +500,8 @@ class HomeAssistantLease extends EventEmitter {
   async stop() {
     this.stopped = true;
     this.eligible = false;
+    if (this.pendingMonitorReplacement) clearImmediate(this.pendingMonitorReplacement);
+    this.pendingMonitorReplacement = null;
     await this.eligibilityTransition.catch(() => {});
     this.clearTimers();
     if (this.monitorStableTimer) clearTimeout(this.monitorStableTimer);
@@ -453,7 +512,7 @@ class HomeAssistantLease extends EventEmitter {
     await this.closeGuard(true);
     if (this.currentLease?.ownerId === this.options.ownerId && this.client?.connected) {
       await new Promise((resolve) => {
-        this.client.publish(this.options.topic, '', { qos: 1, retain: true }, resolve);
+        this.publishRelease(resolve);
       });
     }
     if (this.client) {
